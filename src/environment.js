@@ -111,13 +111,12 @@ export function createNightSkyTexture() {
   return texture;
 }
 
-export function setupScene(CONFIG, skyImage) {
+export function setupScene(CONFIG) {
   const scene = new THREE.Scene();
   const textureLoader = new THREE.TextureLoader();
   
-  // Daytime sky texture (skyImage: the picture, if game.js already has it loaded)
-  const skyTexture = skyImage ? new THREE.Texture(skyImage) : textureLoader.load('sky_39_2k.webp');
-  if (skyImage) skyTexture.needsUpdate = true;
+  // Load daytime sky texture
+  const skyTexture = textureLoader.load('sky_39_2k.webp');
   skyTexture.mapping = THREE.EquirectangularReflectionMapping;
   skyTexture.colorSpace = THREE.SRGBColorSpace;
   scene.background = skyTexture;

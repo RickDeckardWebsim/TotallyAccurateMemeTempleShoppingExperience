@@ -8,7 +8,8 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createSound, setListener, loadSoundPacks, prefetchSoundFiles } from './src/audio-engine.js';
+import { createSound, setListener, loadSoundPacks, prefetchSoundFiles, setMuted } from './src/audio-engine.js';
+import { watchHiddenBottom } from './src/visible-area.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
 import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
@@ -383,27 +384,32 @@ function hideLoadingScreen() {
     }, 320);
 }
 
-// Everything a run shows or plays from its first moment: the store's materials (the maps createPBRMaterial uses at
-// this PBR quality), the sky, the spill stains, the core sounds and the fonts. Downloaded in the background while
-// the menu is up; Play's loading screen waits for whatever hasn't arrived yet, so nothing pops in once a run starts.
-const PRELOAD_MATERIALS = [
-    { r: 14, base: 'uploads/SupermarketTile_BaseColor.png', normal: 'uploads/SupermarketTile_Normal_OpenGL.png', orm: 'uploads/SupermarketTile_ORM.png' },
-    { r: 1, base: 'uploads/VerticalPlankWall_BaseColor.png', normal: 'uploads/VerticalPlankWall_Normal_OpenGL.png', orm: 'uploads/VerticalPlankWall_ORM.png' },
-    { r: 15, base: 'uploads/DropCeiling_BaseColor.png', normal: 'uploads/DropCeiling_Normal_OpenGL.png', orm: 'uploads/DropCeiling_ORM.png' },
-    { r: 1, base: 'uploads/SupermarketBrick_BaseColor.png', normal: 'uploads/SupermarketBrick_Normal_OpenGL.png', orm: 'uploads/SupermarketBrick_ORM.png' },
-    { r: 1, base: 'uploads/Sidewalk_BaseColor_1k.jpg', normal: 'uploads/Sidewalk_Normal_OpenGL_1k.webp', rough: 'uploads/Sidewalk_Roughness_1k.jpg', metal: 'uploads/Sidewalk_Metallic_1k.png', ao: 'uploads/Sidewalk_AO_1k.png' },
-];
+// The store's texture sets (createPBRMaterial's params), in one place: the materials use them and the menu-time
+// preload loads exactly what they will (pbrMaps), so the two can't drift apart.
+const PBR_SETS = {
+    floor: { baseColorPath: 'uploads/SupermarketTile_BaseColor.png', normalPath: 'uploads/SupermarketTile_Normal_OpenGL.png', ormPath: 'uploads/SupermarketTile_ORM.png', repeatX: 14, repeatY: 14 },
+    ceiling: { baseColorPath: 'uploads/DropCeiling_BaseColor.png', normalPath: 'uploads/DropCeiling_Normal_OpenGL.png', ormPath: 'uploads/DropCeiling_ORM.png', repeatX: 15, repeatY: 15 },
+    insideWall: { baseColorPath: 'uploads/VerticalPlankWall_BaseColor.png', normalPath: 'uploads/VerticalPlankWall_Normal_OpenGL.png', ormPath: 'uploads/VerticalPlankWall_ORM.png', repeatX: 1, repeatY: 1 },
+    outsideWall: { baseColorPath: 'uploads/SupermarketBrick_BaseColor.png', normalPath: 'uploads/SupermarketBrick_Normal_OpenGL.png', ormPath: 'uploads/SupermarketBrick_ORM.png', repeatX: 1, repeatY: 1 },
+    sidewalk: { baseColorPath: 'uploads/Sidewalk_BaseColor_1k.jpg', normalPath: 'uploads/Sidewalk_Normal_OpenGL_1k.webp', roughnessPath: 'uploads/Sidewalk_Roughness_1k.jpg',
+        metallicPath: 'uploads/Sidewalk_Metallic_1k.png', aoPath: 'uploads/Sidewalk_AO_1k.png', heightPath: 'uploads/Sidewalk_Height_1k.jpg', repeatX: 1, repeatY: 1 },
+};
+// The textures createPBRMaterial loads for a set at the current PBR quality: [path, isSRGB] (height: only without a normal map)
+function pbrMaps({ baseColorPath, normalPath, ormPath, roughnessPath = ormPath, metallicPath = ormPath, aoPath = ormPath }) {
+    const pbr = CONFIG.PBR_QUALITY || 'high', maps = [[baseColorPath, true]];
+    if (pbr === 'high' || pbr === 'medium') maps.push([normalPath, false], [roughnessPath, false], [metallicPath, false]);
+    if (pbr === 'high') maps.push([aoPath, false]);
+    return maps.filter(([path], k) => path && maps.findIndex(([p]) => p === path) === k);
+}
+
+// Everything a run shows or plays from its first moment: the store's materials, the sky, the spill stains, the
+// core sounds and the fonts. Downloaded in the background while the menu is up; Play's loading screen waits for
+// whatever hasn't arrived yet, so nothing pops in once a run starts.
 async function preloadAllGameAssets(onProgress) {
-    const pbr = CONFIG.PBR_QUALITY || 'high';
-    const textures = [];
-    for (const m of PRELOAD_MATERIALS) {
-        const paths = [m.base];
-        if (pbr === 'high' || pbr === 'medium') paths.push(m.normal, m.orm || m.rough, m.orm || m.metal);
-        if (pbr === 'high') paths.push(m.orm || m.ao);
-        for (const path of new Set(paths)) textures.push({ path, isSRGB: path === m.base, rx: m.r, ry: m.r });
-    }
+    const textures = Object.values(PBR_SETS).flatMap((set) =>
+        pbrMaps(set).map(([path, isSRGB]) => ({ path, isSRGB, rx: set.repeatX, ry: set.repeatY })));
     textures.push({ path: 'watercolor-abstract-background-free-png.png', isSRGB: true, rx: 1, ry: 1 }); // spill stains
-    textures.push({ path: 'sky_39_2k.webp', isSRGB: true, rx: 1, ry: 1 }); // (setupScene uses its picture)
+    textures.push({ path: 'sky_39_2k.webp', isSRGB: true, rx: 1, ry: 1 }); // (so setupScene's load is from memory)
     const jobs = [
         ...textures.map((t) => () => loadTextureAsync(t.path, t.isSRGB, t.rx, t.ry)),
         () => loadSoundPacks(),
@@ -425,24 +431,10 @@ async function preloadAllGameAssets(onProgress) {
     await Promise.all(Array.from({ length: Math.min(lanes, total) }, worker));
 }
 
-// The handwriting and clock fonts (grocery list, timer), so they don't swap in at the start of a run. Their CSS
-// loads without holding up the menu (index.html), so wait for it first (at most 3 s).
+// The handwriting and clock fonts (grocery list, timer), so they don't swap in at the start of a run.
 function loadFonts() {
-    const css = document.querySelector('link[href*="fonts.googleapis.com/css2"]');
-    const cssReady = !css || css.rel === 'stylesheet' ? Promise.resolve()
-        : new Promise((done) => { css.addEventListener('load', done); css.addEventListener('error', done); setTimeout(done, 3000); });
-    return cssReady.then(() => Promise.all(["600 20px 'Caveat'", "700 20px 'Caveat'", "20px 'Patrick Hand'", "20px 'Share Tech Mono'"]
-        .map((f) => document.fonts?.load(f)))).catch(() => {});
-}
-
-// Resolves once the menu's picture has loaded (or after 2 s), so game downloads never hold up the menu.
-function menuPictureShown() {
-    return new Promise((done) => {
-        const img = new Image();
-        img.onload = img.onerror = () => done();
-        img.src = 'menu-bg.webp';
-        setTimeout(done, 2000);
-    });
+    return Promise.all(["600 20px 'Caveat'", "700 20px 'Caveat'", "20px 'Patrick Hand'", "20px 'Share Tech Mono'"]
+        .map((f) => document.fonts?.load(f))).catch(() => {});
 }
 
 // After the run's own assets: what only some runs need (event sounds, the slap print), fetched quietly so it's
@@ -706,7 +698,6 @@ function updateAutoDoors() {
     autoDoors.rightBody.collisionResponse = !autoDoors.open;
 }
 
-let cartRollingRequested = false;
 /* @tweakable Items in the cart at which it rolls with the fully loaded sound */
 const CART_ROLL_FULL_ITEMS = 12;
 /* @tweakable Cart rolling level on the smooth store floor (dB) */
@@ -717,13 +708,12 @@ const CART_ROLL_LOT_DB = 6;
 // basket is (equal power, so the level holds through the blend). Outside the store (rough ground) the
 // blend is louder and a rough-ground loop plays on top; the doorway crossfades. While a wheel is stuck
 // (the cart_stuck event) a squeak plays on top too. Level and pitch follow
-// how fast you push; starting and stopping fade instead of cutting. Without the picked loops: the old
-// on/off loop.
+// how fast you push; starting and stopping fade instead of cutting.
 let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0, cartRollStuck = 0;
 const npcCartSounds = new Map(); // shoppers' carts: customer -> {sound, level} (updateNpcCartSound)
 function updateCartRollingSound(rolling, speed = 0) {
     const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
-    if (!empty || !full) { legacyCartRollingSound(rolling); return; }
+    if (!empty || !full) return;
     const now = performance.now(), dt = Math.min(0.1, cartRollAt ? (now - cartRollAt) / 1000 : 0);
     cartRollAt = now;
     const target = rolling ? Math.min(1, speed / (CONFIG.MOVE_SPEED || 5)) : 0;
@@ -754,15 +744,12 @@ function updateCartRollingSound(rolling, speed = 0) {
     if (squeak) { squeak.volume = Math.min(1, push * cartRollStuck); squeak.playbackRate = pitched('cart-stuck'); }
 }
 // One footstep: a random step (not the last one again) from the picked set for where you are (the store
-// floor or the parking lot), pitch varied a little. Without the picked sets: the old single footstep.
-let lastFootstep = -1;
+// floor or the parking lot), pitch varied a little.
+let lastFootstep = -1, nextFootstepAt = 0; // (a step every 300 ms while you walk)
 function playFootstep() {
     const pos = playerBody?.position, inside = !pos || isInsideStore(pos.x, pos.z);
     const job = inside ? 'steps-store' : 'steps-lot', set = SOUND_PICKS[job]?.steps, sound = soundEffects?.[inside ? 'stepsStore' : 'stepsLot'];
-    if (!set?.length || !sound?.playSlice) {
-        try { soundEffects.footstep.currentTime = 0; soundEffects.footstep.play(); } catch (_) {}
-        return;
-    }
+    if (!set?.length || !sound?.playSlice) return;
     let k = Math.floor(Math.random() * set.length);
     if (k === lastFootstep && set.length > 1) k = (k + 1) % set.length;
     lastFootstep = k;
@@ -783,24 +770,11 @@ function cartBumpFalloff() {
     lastCartBumpAt = now;
     return Math.pow(CART_BUMP_FALLOFF, cartBumpRun);
 }
-// Grabbing or letting go of the cart handle: the picked handle sound (fallback: the old one, if any).
-function playCartHandleSound(fallback) {
-    const sound = soundEffects?.cartHandle || fallback;
+// Grabbing or letting go of the cart handle: the picked handle sound.
+function playCartHandleSound() {
+    const sound = soundEffects?.cartHandle;
     if (!sound) return;
     try { sound.currentTime = 0; sound.play().catch(() => {}); } catch (_) {}
-}
-function legacyCartRollingSound(rolling) {
-    const audio = soundEffects?.cartRoll;
-    if (!audio) return;
-    if (rolling === cartRollingRequested) return;
-    cartRollingRequested = rolling;
-    if (rolling) {
-        setBoostedSfxVolume('cartRoll');
-        audio.play().catch(() => {});
-    } else {
-        audio.pause();
-        audio.currentTime = 0;
-    }
 }
 // Busy checkout event state
 let checkoutBusyActive = false;
@@ -822,6 +796,17 @@ try {
         musicMuted = (savedMuted === 'true');
     }
 } catch (_) {}
+// All sound on/off: the main menu's speaker button and Settings > Sound (music alone: the mute key, M)
+watchHiddenBottom(); // (websim's phone layout hides the bottom of the game's frame)
+let audioMuted = false;
+try { audioMuted = localStorage.getItem('audioMuted') === 'true'; } catch (_) {}
+setMuted(audioMuted);
+function setAudioMuted(muted) {
+    audioMuted = !!muted;
+    try { localStorage.setItem('audioMuted', String(audioMuted)); } catch (_) {}
+    setMuted(audioMuted);
+    try { updateMuteButtonIcon(); } catch (_) {}
+}
 // Add a reference to the loaded sky texture so we can restore it after outages
 let skyTexture = null;
 let nightSkyTexture = null;
@@ -1047,7 +1032,7 @@ function removePhoneKeyListener() {
 
 function stopAllAudio() {
     sweepNpcCartSounds(true);
-    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
+    cartRollLevel = 0; // (a stop is immediate, not a fade)
     customerScuffleMusicMix = 0;
     if (customerScuffleMusic) {
         customerScuffleMusic.pause();
@@ -1194,7 +1179,6 @@ function registerMusic(el) {
 }
 function applyMusicMute() {
     for (const el of musicTracks) { try { el.muted = musicMuted; } catch (_) {} }
-    try { updateMuteButtonIcon(); } catch (_) {}
 }
 function setMusicMuted(muted) {
     musicMuted = !!muted;
@@ -4040,7 +4024,7 @@ const mainMenuElement = document.getElementById('main-menu');
 // Add mute toggle button on main menu (audio symbol)
 const muteBtn = document.createElement('button');
 muteBtn.id = 'mute-toggle';
-muteBtn.setAttribute('aria-label', 'Toggle music mute');
+muteBtn.setAttribute('aria-label', 'Sound on/off');
 muteBtn.textContent = '🔊';
 document.getElementById('game-container').appendChild(muteBtn);
 
@@ -4302,7 +4286,7 @@ function loadSounds() {
     soundEffects.tweakerGrunt = createSound('sfx/tweaker_grunt.wav');
     soundEffects.moneyPickup = createSound('sfx/money_pickup.wav');
     Object.keys(BOOSTED_SFX_MULTIPLIERS).forEach(name => setBoostedSfxVolume(name));
-    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
+    cartRollLevel = 0; // (a stop is immediate, not a fade)
     sfxKey = singles.sfxKey;
     sfxTada = singles.sfxTada;
     sfxPowerDown = singles.sfxPowerDown;
@@ -4371,9 +4355,7 @@ function installIndoorDimming(r) {
 }
 
 function setupScene() {
-    let skyImage = textureCache.get('sky_39_2k.webp_true_1_1')?.image; // (preloaded while the menu was up)
-    if (!(skyImage?.width > 4)) skyImage = null; // (not the grey stand-in from a failed load: let setupScene try again)
-    const { scene: newScene, camera: newCamera, renderer: newRenderer, skyTexture: skyTex, nightSkyTexture: nightSkyTex, lights } = setupSceneExt(CONFIG, skyImage);
+    const { scene: newScene, camera: newCamera, renderer: newRenderer, skyTexture: skyTex, nightSkyTexture: nightSkyTex, lights } = setupSceneExt(CONFIG);
     scene = newScene;
     camera = newCamera;
     renderer = newRenderer;
@@ -4617,11 +4599,7 @@ function createStoreLayout() {
     floorGeometry.setAttribute('uv2', floorGeometry.attributes.uv);
 
     const floorMaterial = createPBRMaterial({
-        baseColorPath: 'uploads/SupermarketTile_BaseColor.png',
-        normalPath: 'uploads/SupermarketTile_Normal_OpenGL.png',
-        ormPath: 'uploads/SupermarketTile_ORM.png',
-        repeatX: 14,
-        repeatY: 14,
+        ...PBR_SETS.floor,
         defaultRoughness: 0.38,
         defaultMetalness: 0.05,
         bumpScale: 0.015
@@ -4648,11 +4626,7 @@ function createStoreLayout() {
     ceilingGeometry.setAttribute('uv2', ceilingGeometry.attributes.uv);
 
     const ceilingMaterial = createPBRMaterial({
-        baseColorPath: 'uploads/DropCeiling_BaseColor.png',
-        normalPath: 'uploads/DropCeiling_Normal_OpenGL.png',
-        ormPath: 'uploads/DropCeiling_ORM.png',
-        repeatX: 15,
-        repeatY: 15,
+        ...PBR_SETS.ceiling,
         defaultRoughness: 0.65,
         defaultMetalness: 0.15,
         bumpScale: 0.015,
@@ -5622,14 +5596,7 @@ function createExteriorScenery() {
 
     // 2. Concrete sidewalk full configurable PBR materials (from uploaded high-res maps)
     const sidewalkMat = createPBRMaterial({
-        baseColorPath: 'uploads/Sidewalk_BaseColor_1k.jpg',
-        normalPath: 'uploads/Sidewalk_Normal_OpenGL_1k.webp',
-        roughnessPath: 'uploads/Sidewalk_Roughness_1k.jpg',
-        metallicPath: 'uploads/Sidewalk_Metallic_1k.png',
-        aoPath: 'uploads/Sidewalk_AO_1k.png',
-        heightPath: 'uploads/Sidewalk_Height_1k.jpg',
-        repeatX: 1,
-        repeatY: 1,
+        ...PBR_SETS.sidewalk,
         defaultRoughness: 0.82,
         defaultMetalness: 0.05,
         bumpScale: 0.015
@@ -6915,15 +6882,8 @@ function applyWorldUVsToBox(geo, x, y, z, w, h, d, scaleX = 0.5, scaleY = 0.5) {
 
 function createWalls() {
     // Inside wall configurable PBR textures
-    const wallRepeatX = 1;
-    const wallRepeatY = 1;
-
     const insideWallMat = createPBRMaterial({
-        baseColorPath: 'uploads/VerticalPlankWall_BaseColor.png',
-        normalPath: 'uploads/VerticalPlankWall_Normal_OpenGL.png',
-        ormPath: 'uploads/VerticalPlankWall_ORM.png',
-        repeatX: wallRepeatX,
-        repeatY: wallRepeatY,
+        ...PBR_SETS.insideWall,
         defaultRoughness: 0.38,
         defaultMetalness: 0.05,
         bumpScale: 0.015,
@@ -6931,15 +6891,9 @@ function createWalls() {
     });
 
     // Outside wall configurable PBR textures (SupermarketBrick)
-    const outsideWallRepeatX = 1;
-    const outsideWallRepeatY = 1;
 
     const outsideWallMat = createPBRMaterial({
-        baseColorPath: 'uploads/SupermarketBrick_BaseColor.png',
-        normalPath: 'uploads/SupermarketBrick_Normal_OpenGL.png',
-        ormPath: 'uploads/SupermarketBrick_ORM.png',
-        repeatX: outsideWallRepeatX,
-        repeatY: outsideWallRepeatY,
+        ...PBR_SETS.outsideWall,
         defaultRoughness: 0.65,
         defaultMetalness: 0.05,
         bumpScale: 0.015,
@@ -10509,6 +10463,7 @@ function finishIntroCutscene(skipped = false) {
         cartObject.rotation.set(0, 0, 0);
     }
     cartAttached = true;
+    greetWithBaby();
 
     // Welcome chime sound
     try {
@@ -11243,12 +11198,12 @@ function setupEvents() {
         if (event.code === kb.cart && !SQ.isMovementLocked()) {
             if (cartAttached) {
                 cartAttached = false;
-                playCartHandleSound(soundEffects.cartDrop);
+                playCartHandleSound();
                 displayMessage(`Detached from cart. You can now grab items off shelves! (Press ${formatKeyName(kb.cart)} to push cart)`, 2200);
             } else {
                 if (canInteractWithCart()) {
                     cartAttached = true;
-                    playCartHandleSound(soundEffects.grab);
+                    playCartHandleSound();
                     displayMessage("Attached to shopping cart!", 1500);
                 } else {
                     displayMessage(`Get closer to your shopping cart to attach! (Press ${formatKeyName(kb.cart)})`, 1800);
@@ -11391,17 +11346,13 @@ function setupEvents() {
         }
 
         if ((Math.abs(moveX) > 0.5 || Math.abs(moveZ) > 0.5) &&
-            !soundEffects.footstep.playing &&
+            performance.now() >= nextFootstepAt &&
             playerBody.position.y < 1.1) {
 
             playFootstep();
-            soundEffects.footstep.playing = true;
+            nextFootstepAt = performance.now() + 300;
 
             footstepCount++;
-
-            setTimeout(() => {
-                soundEffects.footstep.playing = false;
-            }, 300);
         }
 
         const currentPos = { x: playerBody.position.x, z: playerBody.position.z };
@@ -12154,6 +12105,7 @@ function startGame() {
             cartObject.rotation.set(0, 0, 0);
         }
         cartAttached = true;
+        greetWithBaby();
 
         // Lock controls safely
         if (controls && !controls.isLocked) { try { controls.lock(); } catch (_) {} }
@@ -13458,10 +13410,31 @@ function updateCartDroppingItems(delta) {
             finalizeItemInCart(anim.item);
             if (anim.babyGrabbed) {
                 displayRngNotification(`🍼 Your baby grabbed ${anim.item.name}!`, 4200);
+                playBabyGiggle();
             }
             cartDroppingItems.splice(i, 1);
         }
     }
+}
+
+// The baby in the cart giggles: a random one of the picked giggles (never the same twice running), from the cart.
+// When something it grabbed lands in the cart, and as a run starts with it there (greetWithBaby).
+let lastBabyGiggle = -1;
+function playBabyGiggle() {
+    const giggles = soundEffects?.babyGiggles;
+    if (!giggles?.length || !cartObject) return;
+    let k = Math.floor(Math.random() * giggles.length);
+    if (giggles.length > 1 && k === lastBabyGiggle) k = (k + 1) % giggles.length;
+    lastBabyGiggle = k;
+    try {
+        const g = giggles[k].cloneNode(), p = cartObject.getWorldPosition(new THREE.Vector3());
+        g.setPosition?.(p.x, 1, p.z);
+        g.volume = CONFIG.SFX_VOLUME ?? 0.7;
+        g.play().catch(() => {});
+    } catch (_) {}
+}
+function greetWithBaby() {
+    if (cartBaby) setTimeout(() => { if (gameStarted && !gameOver && cartBaby) playBabyGiggle(); }, 600);
 }
 
 // Items landing in the cart: each item's own drop sound (SOUND_PICKS 'drop-<item>'), layered on the list
@@ -18652,9 +18625,8 @@ function showMainMenu() {
     // Some mobile browsers swallow the synthetic click (e.g. under an overlay
     // or after a scroll gesture); start directly from the touch as well.
     playBtn.ontouchend = onPlay;
-    // Play pressed while the game was still loading (index.html noted it): start now.
-    window.__gameReady = true;
-    if (window.__playQueued) { window.__playQueued = false; playBtn.textContent = 'Play'; onPlay(); }
+    // The buttons work now: fade them in (index.html keeps them hidden until here)
+    mainMenuElement.classList.remove('booting');
 
     document.getElementById('customize-game').onclick = () => {
         const menu = document.getElementById('customization-menu');
@@ -18684,13 +18656,13 @@ function showMainMenu() {
     // Update mute icon to reflect current state
     updateMuteButtonIcon();
     // Bind mute toggle
-    muteBtn.onclick = () => setMusicMuted(!musicMuted);
+    muteBtn.onclick = () => setAudioMuted(!audioMuted);
 }
 
 function updateMuteButtonIcon() {
     if (!muteBtn) return;
-    muteBtn.textContent = musicMuted ? '🔇' : '🔊';
-    muteBtn.title = musicMuted ? 'Unmute music' : 'Mute music';
+    muteBtn.textContent = audioMuted ? '🔇' : '🔊';
+    muteBtn.title = audioMuted ? 'Sound on' : 'Sound off';
 }
 
 function hideMainMenu() {
@@ -19298,6 +19270,8 @@ function performSaveSettings() {
     const mv = parseFloat(musicSlider?.value ?? CONFIG.MUSIC_VOLUME ?? 0.5);
     const sv = parseFloat(sfxSlider?.value ?? CONFIG.SFX_VOLUME ?? 0.7);
     CONFIG.MUSIC_VOLUME = mv; CONFIG.SFX_VOLUME = sv;
+    const soundOn = document.getElementById('sound-on');
+    if (soundOn) setAudioMuted(!soundOn.checked);
     if (menuMusic) menuMusic.volume = mv;
     if (music) music.volume = mv * (1 - customerScuffleMusicMix);
     if (customerScuffleMusic) customerScuffleMusic.volume = mv * customerScuffleMusicMix;
@@ -19357,6 +19331,8 @@ function populateSettingsMenu() {
     // Set current values
     if (musicSlider) musicSlider.value = CONFIG.MUSIC_VOLUME ?? 0.5;
     if (sfxSlider) sfxSlider.value = CONFIG.SFX_VOLUME ?? 0.7;
+    const soundOnCheck = document.getElementById('sound-on');
+    if (soundOnCheck) soundOnCheck.checked = !audioMuted;
     if (lightingSelect) lightingSelect.value = (CONFIG.LIGHTING_QUALITY || 'high');
     if (pbrSelect) pbrSelect.value = (CONFIG.PBR_QUALITY || 'high');
     if (qSelect) qSelect.value = (CONFIG.RENDER_QUALITY || 'medium');
@@ -19493,10 +19469,9 @@ function init() {
     updateScoreboard();
     loadingElement.style.display = 'none';
 
-    // Menu first: once the menu and its picture are on screen, download what a run needs (textures, sky, core
-    // sounds, fonts; Play waits for these), then quietly the extras (event sounds...), so nothing loads mid-run.
-    menuPictureShown()
-        .then(() => preloadAllGameAssets())
+    // While the menu is up (its picture is in index.html, so it starts loading with the page's CSS), download what a run needs (textures,
+    // sky, core sounds, fonts; Play waits for these), then quietly the extras (event sounds...), so nothing loads mid-run.
+    preloadAllGameAssets()
         .catch(e => console.warn('Background pre-stream:', e))
         .then(prefetchExtras);
 
@@ -20492,7 +20467,7 @@ function nukeFreezeRun() {
     cancelScheduledEvents(true);
     if (addItemIntervalId) { clearInterval(addItemIntervalId); addItemIntervalId = null; }
     if (removeItemIntervalId) { clearInterval(removeItemIntervalId); removeItemIntervalId = null; }
-    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
+    cartRollLevel = 0; // (a stop is immediate, not a fade)
     try { updateCartRollingSound(false); } catch (_) {}
     if (soundEffects?.entranceBeep) { try { soundEffects.entranceBeep.pause(); } catch (_) {} }
 }

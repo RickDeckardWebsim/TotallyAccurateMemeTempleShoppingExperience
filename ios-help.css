@@ -77,7 +77,7 @@
     position: fixed;
     left: 8px;
     right: 8px;
-    bottom: max(8px, env(safe-area-inset-bottom));
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + var(--hidden-bottom, 0px));
     z-index: 6000;
     padding: 8px 12px;
     border-radius: 10px;

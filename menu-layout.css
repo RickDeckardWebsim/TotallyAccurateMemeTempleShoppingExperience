@@ -5,6 +5,7 @@
 
 #menu-bg {
     inset: 1.4vmin;
+    bottom: calc(1.4vmin + var(--hidden-bottom, 0px)); /* (above anything the page around the game hides: src/visible-area.js) */
     transform: none;
     border-radius: 16px;
     overflow: hidden;
@@ -33,9 +34,13 @@
 }
 
 /* Buttons scale with the viewport height so they always sit under the title */
+/* Until game.js has wired the menu up, only its picture shows; then the buttons fade in */
+#main-menu { transition: opacity 0.3s ease; }
+#main-menu.booting { opacity: 0; pointer-events: none; }
+
 #main-menu {
     right: calc(1.4vmin + clamp(10px, 2.2vw, 28px));
-    bottom: calc(1.4vmin + clamp(10px, 2.4vh, 28px));
+    bottom: calc(1.4vmin + clamp(10px, 2.4vh, 28px) + var(--hidden-bottom, 0px));
 }
 #main-menu .main-menu-btn {
     width: clamp(180px, 25vw, 340px);
@@ -53,12 +58,12 @@
     font-size: clamp(13px, 2.5vh, 1.35rem);
     border-radius: clamp(10px, 1.5vh, 15px);
 }
-#open-shop         { bottom: calc(1.4vmin + 40px); }
-#open-achievements { bottom: calc(1.4vmin + 40px + clamp(38px, 8.6vh, 72px)); }
-#ss-open           { bottom: calc(1.4vmin + 40px + 2 * clamp(38px, 8.6vh, 72px)); }
+#open-shop         { bottom: calc(1.4vmin + 40px + var(--hidden-bottom, 0px)); }
+#open-achievements { bottom: calc(1.4vmin + 40px + clamp(38px, 8.6vh, 72px) + var(--hidden-bottom, 0px)); }
+#ss-open           { bottom: calc(1.4vmin + 40px + 2 * clamp(38px, 8.6vh, 72px) + var(--hidden-bottom, 0px)); }
 #version-label {
     left: calc(1.4vmin + 8px);
-    bottom: calc(1.4vmin + 6px);
+    bottom: calc(1.4vmin + 6px + var(--hidden-bottom, 0px));
     font-size: clamp(11px, 1.8vh, 0.95rem);
 }
 #mute-toggle {
@@ -91,7 +96,7 @@
     #open-shop,
     #open-achievements,
     #ss-open {
-        bottom: calc(1.4vmin + 40px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(1.4vmin + 40px + env(safe-area-inset-bottom, 0px) + var(--hidden-bottom, 0px));
         width: 29vw;
         max-width: 200px;
         padding: 10px 0;
@@ -111,9 +116,9 @@
 /* Very short landscape (phones on their side): tighten everything */
 @media (max-height: 430px) and (min-aspect-ratio: 1/1) {
     #main-menu .main-menu-btn { margin: 5px 0; }
-    #open-shop         { bottom: calc(1.4vmin + 30px); }
-    #open-achievements { bottom: calc(1.4vmin + 30px + 40px); }
-    #ss-open           { bottom: calc(1.4vmin + 30px + 80px); }
+    #open-shop         { bottom: calc(1.4vmin + 30px + var(--hidden-bottom, 0px)); }
+    #open-achievements { bottom: calc(1.4vmin + 30px + 40px + var(--hidden-bottom, 0px)); }
+    #ss-open           { bottom: calc(1.4vmin + 30px + 80px + var(--hidden-bottom, 0px)); }
 }
 
 /* Keep the other menus usable on any screen size */

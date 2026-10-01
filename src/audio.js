@@ -19,8 +19,6 @@ import { SOUND_PICKS } from './sound-picks.js';
 
 // Button hover/click sounds: made with the page (not with a run), so the main menu has them too
 export const UI_SOUNDS = { uiHover: createSound('sfx/ui_hover.wav'), uiClick: createSound('sfx/ui_click.wav') };
-UI_SOUNDS.uiHover.volume = CONFIG.SFX_VOLUME * 0.55;
-UI_SOUNDS.uiClick.volume = CONFIG.SFX_VOLUME * 0.8;
 
 export async function safePlay(audio) {
   if (!audio || !audio.src) return;
@@ -63,20 +61,12 @@ export function loadSounds({ musicMuted = false } = {}) {
   const music = createSound(chosenMusicFile, { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
   music.muted = musicMuted;
 
-  // Footstep (replacement already wired to FOOT3.mp3)
-  soundEffects.footstep = createSound('FOOT3.mp3');
-  soundEffects.footstep.volume = CONFIG.SFX_VOLUME * 0.5;
-  soundEffects.footstep.playing = false;
-
   const audioFile = 'footsteps-on-wood-floor-14735.wav';
   soundEffects.grab = createSound(audioFile); soundEffects.grab.volume = CONFIG.SFX_VOLUME;
   // Use the new whu6.wav for accidental drop sound
   soundEffects.drop = createSound('whu6.wav'); soundEffects.drop.volume = CONFIG.SFX_VOLUME;
   soundEffects.checkout = createSound(audioFile); soundEffects.checkout.volume = CONFIG.SFX_VOLUME;
   soundEffects.cartAdd = createSound('sfx/cart_drop.wav'); soundEffects.cartAdd.volume = CONFIG.SFX_VOLUME;
-  soundEffects.cartRoll = createSound('sfx/cart_roll.wav');
-  soundEffects.cartRoll.loop = true;
-  soundEffects.cartRoll.volume = Math.min(1, CONFIG.SFX_VOLUME * 1.4);
   soundEffects.powerOutage = createSound(audioFile); soundEffects.powerOutage.volume = CONFIG.SFX_VOLUME;
   soundEffects.storeClosing = createSound(audioFile); soundEffects.storeClosing.volume = CONFIG.SFX_VOLUME;
 
@@ -122,7 +112,6 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.textChime.volume = CONFIG.SFX_VOLUME;
 
   // Soft UI sounds used by the shared button hover/click handlers.
-  Object.assign(soundEffects, UI_SOUNDS);
 
   // Earthquake rumble SFX
   soundEffects.earthquake = createSound('sfx/earthquake.wav', { stream: true });
@@ -180,6 +169,10 @@ export function loadSounds({ musicMuted = false } = {}) {
 
   // The cart crashing back down after being flung (tripping); spatial, placed where it lands
   if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 6, maxDistance: 60 } });
+
+  // The baby in the cart giggling (game.js plays a random one): spatial, placed at the cart
+  soundEffects.babyGiggles = ['baby-giggle-a', 'baby-giggle-b', 'baby-giggle-c', 'baby-giggle-d']
+    .filter(j => SOUND_PICKS[j]).map(j => createSound(SOUND_PICKS[j].src, { spatial: { refDistance: 4, maxDistance: 40 } }));
 
   // Grabbing / letting go of the cart handle (F)
   if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);

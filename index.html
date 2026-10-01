@@ -7,9 +7,7 @@
     <title>Shopping Simulator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- The menu shows as soon as the page and its CSS are here: its picture loads first, and the fonts don't hold it up -->
-    <link rel="preload" href="menu-bg.webp" as="image" fetchpriority="high">
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Patrick+Hand&family=Share+Tech+Mono&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Patrick+Hand&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="side-quests.css">
     <link rel="stylesheet" href="thermostat.css">
@@ -361,6 +359,7 @@
             <div id="settings-tab-general" class="settings-tab-pane active">
                 <div class="customization-section">
                     <h3>Audio</h3>
+                    <label><input type="checkbox" id="sound-on"> Sound on (also the speaker button on the main menu)</label>
                     <div class="slider-container">
                         <label for="music-volume">Music Volume:</label>
                         <input type="range" id="music-volume" min="0" max="1" step="0.01">
@@ -571,8 +570,9 @@
                 <div id="shop-grid" class="shop-grid"></div>
             </div>
         </div>
-        <!-- The main menu is part of the page, so it's on screen before the game's scripts have loaded (game.js wires it up) -->
-        <div id="main-menu">
+        <!-- The main menu is part of the page, so its picture is on screen before the game's scripts have loaded; the
+             buttons fade in once game.js has wired them up (class "booting" until then) -->
+        <div id="main-menu" class="booting">
             <button id="start-game" class="main-menu-btn">Play</button>
             <button id="customize-game" class="main-menu-btn">Customize Game</button>
             <button id="open-leaderboard" class="main-menu-btn">Leaderboard</button>
@@ -580,14 +580,6 @@
         </div>
         <div id="menu-bg"></div>
     </div>
-    <script>
-        // Play pressed before the game has loaded: remember it, and game.js starts the run as soon as it's ready.
-        document.getElementById('start-game').addEventListener('click', function () {
-            if (window.__gameReady) return;
-            window.__playQueued = true;
-            this.textContent = 'Loading...';
-        });
-    </script>
     <script type="module" src="config.js"></script>
     <script type="module" src="game.js"></script>
     <script type="module" src="src/touch-controls.js"></script>
