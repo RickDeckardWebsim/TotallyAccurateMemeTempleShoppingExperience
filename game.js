@@ -681,6 +681,7 @@ const CART_ROLL_LOT_DB = 6;
 // how fast you push; starting and stopping fade instead of cutting. Without the picked loops: the old
 // on/off loop.
 let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0, cartRollStuck = 0;
+const npcCartSounds = new Map(); // shoppers' carts: customer -> {sound, level} (updateNpcCartSound)
 function updateCartRollingSound(rolling, speed = 0) {
     const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
     if (!empty || !full) { legacyCartRollingSound(rolling); return; }
@@ -991,6 +992,7 @@ function removePhoneKeyListener() {
 }
 
 function stopAllAudio() {
+    sweepNpcCartSounds(true);
     cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     customerScuffleMusicMix = 0;
     if (customerScuffleMusic) {
@@ -5504,11 +5506,42 @@ function createNpcCartForCustomer(cust) {
     return { group, body, slots, items: [], wobblePhase: Math.random()*Math.PI*2 };
 }
 
+// Shoppers' carts roll audibly: each cart has its own copy of the picked store-floor roll (SOUND_PICKS
+// 'npc-cart-roll'), placed at the cart (spatial: heard from the camera, panned, quieter with distance),
+// louder and a little higher the faster it moves, silent when it stops. sweepNpcCartSounds (each frame)
+// stops the sound of a shopper who has left, lost the cart, or a game that has ended.
+function updateNpcCartSound(cust, speed, delta) {
+    const pick = SOUND_PICKS['npc-cart-roll'];
+    if (!pick) return;
+    let entry = npcCartSounds.get(cust);
+    if (!entry) {
+        entry = { sound: createSound(pick.src, { loop: true, volume: 0, spatial: { refDistance: 3, maxDistance: 45 } }), level: 0 };
+        npcCartSounds.set(cust, entry);
+    }
+    const target = Math.min(1, speed / Math.max(0.5, cust.walkSpeed || 2));
+    entry.level += (target - entry.level) * (1 - Math.exp(-(delta || 0.016) * 8));
+    const { sound } = entry, g = cust.cart.group.position;
+    if (entry.level < 0.02) { if (!sound.paused) sound.pause(); return; }
+    sound.setPosition(g.x, 0.6, g.z);
+    sound.volume = (CONFIG.SFX_VOLUME ?? 0.7) * Math.pow(entry.level, 0.7);
+    sound.playbackRate = 0.85 + 0.25 * entry.level;
+    if (sound.paused) sound.play().catch(() => {});
+}
+function sweepNpcCartSounds(all = false) {
+    for (const [cust, entry] of npcCartSounds) {
+        if (all || gameOver || !cust.hasCart || !customers.includes(cust)) {
+            try { entry.sound.pause(); } catch (_) {}
+            npcCartSounds.delete(cust);
+        }
+    }
+}
+
 // Smoothly sync NPC cart to customer each frame
 function updateNpcCartFollow(cust, delta) {
     if (!cust.hasCart || !cust.cart || !cust.body) return;
     const velx = cust.body.velocity.x, velz = cust.body.velocity.z;
     const speed = Math.hypot(velx, velz);
+    updateNpcCartSound(cust, speed, delta);
     
     // Smooth facing aligned with customer rotation
     const facing = cust.rotation.y || 0;
@@ -15570,6 +15603,7 @@ const DAY_BG_COLOR = new THREE.Color(0x87CEEB);
 function animate() {
     animationFrameId = requestAnimationFrame(animate);
     setListener(camera); // spatial sounds are heard from the camera
+    if (npcCartSounds.size) sweepNpcCartSounds();
     frameCount++;
     if (CONFIG.SHOW_FPS) updateFps();
 
