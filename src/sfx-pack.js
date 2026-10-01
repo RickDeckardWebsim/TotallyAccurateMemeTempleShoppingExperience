@@ -5,273 +5,71 @@
 // Adding a sound: nothing to do here. A file that isn't listed loads on its own, as it always did.
 // CHANGING a sound that's listed (new audio, same file name): the pack still has the old audio, so
 // either run the tool again, or delete that file's line below and it loads its own file again.
-export const SFX_PACK = {
- "src": "sfx/pack.mp3",
- "mark": 0.05,
- "sounds": {
-  "footsteps-on-wood-floor-14735.wav": [
-   0.252,
-   3.21092
-  ],
-  "whu6.wav": [
-   3.51292,
-   0.14
-  ],
-  "run.wav": [
-   3.70292,
-   0.28325
-  ],
-  "key.wav": [
-   4.03617,
-   0.19912
-  ],
-  "tada.wav": [
-   4.28529,
-   1.25894
-  ],
-  "squeak-duck.mp3": [
-   5.59423,
-   1.7415
-  ],
-  "cartoonslip.mp3": [
-   7.38573,
-   0.19827
-  ],
-  "beep2.mp3": [
-   7.634,
-   0.17415
-  ],
-  "Kerplunk.wav": [
-   7.85815,
-   0.17913
-  ],
-  "slap.mp3": [
-   8.08727,
-   0.63319
-  ],
-  "Cash_Register_Open_01.wav": [
-   8.77046,
-   1.81585
-  ],
-  "20200624_Cartoon Splat sound effect.wav": [
-   10.63631,
-   0.89398
-  ],
-  "ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav": [
-   11.58029,
-   0.454
-  ],
-  "sfx/cart_drop.wav": [
-   12.08429,
-   1
-  ],
-  "sfx/ui_hover.wav": [
-   13.13429,
-   0.96
-  ],
-  "sfx/ui_click.wav": [
-   14.14429,
-   1.2
-  ],
-  "sfx/entrance_beep.wav": [
-   15.39429,
-   2.4
-  ],
-  "sfx/door_open.mp3": [
-   17.84429,
-   1.944
-  ],
-  "sfx/door_close.mp3": [
-   19.83829,
-   1.896
-  ],
-  "sfx/cart_roll_empty.wav": [
-   21.83429,
-   6
-  ],
-  "sfx/cart_roll_full.wav": [
-   27.98429,
-   5
-  ],
-  "sfx/cart_roll_rough.wav": [
-   33.13429,
-   4
-  ],
-  "sfx/cart_stuck_squeak.wav": [
-   37.28429,
-   4
-  ],
-  "sfx/cart_handle.mp3": [
-   41.38429,
-   0.552
-  ],
-  "sfx/steps_store.wav": [
-   41.98629,
-   5.76
-  ],
-  "sfx/steps_lot.wav": [
-   47.79629,
-   5.76
-  ],
-  "sfx/npc_cart_roll.wav": [
-   53.65629,
-   6
-  ],
-  "sfx/drops/apples.mp3": [
-   59.75629,
-   0.816
-  ],
-  "sfx/drops/bananas.mp3": [
-   60.62229,
-   0.72
-  ],
-  "sfx/drops/batteries.mp3": [
-   61.39229,
-   0.36
-  ],
-  "sfx/drops/bread.mp3": [
-   61.80229,
-   0.216
-  ],
-  "sfx/drops/canned-goods.mp3": [
-   62.06829,
-   0.576
-  ],
-  "sfx/drops/cereal.mp3": [
-   62.69429,
-   1.032
-  ],
-  "sfx/drops/cheese.mp3": [
-   63.77629,
-   1.032
-  ],
-  "sfx/drops/chewing-gum.mp3": [
-   64.85829,
-   0.984
-  ],
-  "sfx/drops/chicken.mp3": [
-   65.89229,
-   0.408
-  ],
-  "sfx/drops/chocolate-bars.mp3": [
-   66.35029,
-   0.36
-  ],
-  "sfx/drops/cleaning-supplies.mp3": [
-   66.76029,
-   0.456
-  ],
-  "sfx/drops/coffee.mp3": [
-   67.26629,
-   0.432
-  ],
-  "sfx/drops/cooking-oil.mp3": [
-   67.74829,
-   0.744
-  ],
-  "sfx/drops/dog-food.mp3": [
-   68.54229,
-   0.648
-  ],
-  "sfx/drops/eggs.mp3": [
-   69.24029,
-   0.864
-  ],
-  "sfx/drops/flowers.mp3": [
-   70.15429,
-   0.936
-  ],
-  "sfx/drops/grapes.mp3": [
-   71.14029,
-   0.456
-  ],
-  "sfx/drops/ice-cream.mp3": [
-   71.64629,
-   0.408
-  ],
-  "sfx/drops/ketchup.mp3": [
-   72.10429,
-   0.624
-  ],
-  "sfx/drops/lettuce.mp3": [
-   72.77829,
-   0.84
-  ],
-  "sfx/drops/milk.mp3": [
-   73.66829,
-   0.456
-  ],
-  "sfx/drops/mustard.mp3": [
-   74.17429,
-   0.864
-  ],
-  "sfx/drops/orange-juice.mp3": [
-   75.08829,
-   0.864
-  ],
-  "sfx/drops/pants.mp3": [
-   76.00229,
-   0.216
-  ],
-  "sfx/drops/pasta-sauce.mp3": [
-   76.26829,
-   0.792
-  ],
-  "sfx/drops/pasta.mp3": [
-   77.11029,
-   1.008
-  ],
-  "sfx/drops/peanut-butter.mp3": [
-   78.16829,
-   0.36
-  ],
-  "sfx/drops/pizza.mp3": [
-   78.57829,
-   0.552
-  ],
-  "sfx/drops/potatoes.mp3": [
-   79.18029,
-   0.624
-  ],
-  "sfx/drops/shampoo.mp3": [
-   79.85429,
-   1.008
-  ],
-  "sfx/drops/soda.mp3": [
-   80.91229,
-   0.912
-  ],
-  "sfx/drops/steak.mp3": [
-   81.87429,
-   0.816
-  ],
-  "sfx/drops/sugar.mp3": [
-   82.74029,
-   0.864
-  ],
-  "sfx/drops/toilet-paper.mp3": [
-   83.65429,
-   0.912
-  ],
-  "sfx/drops/towels.mp3": [
-   84.61629,
-   0.456
-  ],
-  "sfx/drops/toys.mp3": [
-   85.12229,
-   0.744
-  ],
-  "sfx/drops/water-bottles.mp3": [
-   85.91629,
-   0.864
-  ],
-  "sfx/drops/watermelon.mp3": [
-   86.83029,
-   0.576
-  ],
-  "sfx/cart_crash.mp3": [
-   87.45629,
-   1.2
-  ]
- }
-};
+export const SFX_PACK = { src: 'sfx/pack.mp3', mark: 0.05, sounds: {
+ "footsteps-on-wood-floor-14735.wav": [0.252,3.21092],
+ "whu6.wav": [3.51292,0.14],
+ "run.wav": [3.70292,0.28325],
+ "key.wav": [4.03617,0.19912],
+ "tada.wav": [4.28529,1.25894],
+ "squeak-duck.mp3": [5.59423,1.7415],
+ "cartoonslip.mp3": [7.38573,0.19827],
+ "beep2.mp3": [7.634,0.17415],
+ "Kerplunk.wav": [7.85815,0.17913],
+ "slap.mp3": [8.08727,0.63319],
+ "Cash_Register_Open_01.wav": [8.77046,1.81585],
+ "20200624_Cartoon Splat sound effect.wav": [10.63631,0.89398],
+ "ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav": [11.58029,0.454],
+ "sfx/cart_drop.wav": [12.08429,1],
+ "sfx/ui_hover.wav": [13.13429,0.96],
+ "sfx/ui_click.wav": [14.14429,1.2],
+ "sfx/entrance_beep.wav": [15.39429,2.4],
+ "sfx/door_open.mp3": [17.84429,1.944],
+ "sfx/door_close.mp3": [19.83829,1.896],
+ "sfx/cart_roll_empty.wav": [21.83429,6],
+ "sfx/cart_roll_full.wav": [27.98429,5],
+ "sfx/cart_roll_rough.wav": [33.13429,4],
+ "sfx/cart_stuck_squeak.wav": [37.28429,4],
+ "sfx/cart_handle.mp3": [41.38429,0.552],
+ "sfx/steps_store.wav": [41.98629,5.76],
+ "sfx/steps_lot.wav": [47.79629,5.76],
+ "sfx/npc_cart_roll.wav": [53.65629,6],
+ "sfx/drops/apples.mp3": [59.75629,0.816],
+ "sfx/drops/bananas.mp3": [60.62229,0.72],
+ "sfx/drops/batteries.mp3": [61.39229,0.36],
+ "sfx/drops/bread.mp3": [61.80229,0.216],
+ "sfx/drops/canned-goods.mp3": [62.06829,0.576],
+ "sfx/drops/cereal.mp3": [62.69429,1.032],
+ "sfx/drops/cheese.mp3": [63.77629,1.032],
+ "sfx/drops/chewing-gum.mp3": [64.85829,0.984],
+ "sfx/drops/chicken.mp3": [65.89229,0.408],
+ "sfx/drops/chocolate-bars.mp3": [66.35029,0.36],
+ "sfx/drops/cleaning-supplies.mp3": [66.76029,0.456],
+ "sfx/drops/coffee.mp3": [67.26629,0.432],
+ "sfx/drops/cooking-oil.mp3": [67.74829,0.744],
+ "sfx/drops/dog-food.mp3": [68.54229,0.648],
+ "sfx/drops/eggs.mp3": [69.24029,0.864],
+ "sfx/drops/flowers.mp3": [70.15429,0.936],
+ "sfx/drops/grapes.mp3": [71.14029,0.456],
+ "sfx/drops/ice-cream.mp3": [71.64629,0.408],
+ "sfx/drops/ketchup.mp3": [72.10429,0.624],
+ "sfx/drops/lettuce.mp3": [72.77829,0.84],
+ "sfx/drops/milk.mp3": [73.66829,0.456],
+ "sfx/drops/mustard.mp3": [74.17429,0.864],
+ "sfx/drops/orange-juice.mp3": [75.08829,0.864],
+ "sfx/drops/pants.mp3": [76.00229,0.216],
+ "sfx/drops/pasta-sauce.mp3": [76.26829,0.792],
+ "sfx/drops/pasta.mp3": [77.11029,1.008],
+ "sfx/drops/peanut-butter.mp3": [78.16829,0.36],
+ "sfx/drops/pizza.mp3": [78.57829,0.552],
+ "sfx/drops/potatoes.mp3": [79.18029,0.624],
+ "sfx/drops/shampoo.mp3": [79.85429,1.008],
+ "sfx/drops/soda.mp3": [80.91229,0.912],
+ "sfx/drops/steak.mp3": [81.87429,0.816],
+ "sfx/drops/sugar.mp3": [82.74029,0.864],
+ "sfx/drops/toilet-paper.mp3": [83.65429,0.912],
+ "sfx/drops/towels.mp3": [84.61629,0.456],
+ "sfx/drops/toys.mp3": [85.12229,0.744],
+ "sfx/drops/water-bottles.mp3": [85.91629,0.864],
+ "sfx/drops/watermelon.mp3": [86.83029,0.576],
+ "sfx/cart_crash.mp3": [87.45629,1.2]
+} };
