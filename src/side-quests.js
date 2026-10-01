@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { buildCarModel } from './car-skins.js';
 import { equippedCarSkin } from './shop.js';
+import { createSound } from './audio-engine.js';
 
 const BATH = { x0: 30, doorZ: -27.9, zMin: -30, zMax: -21.5 };
 const DESK = { x: -22, z: -24, topY: 1.2, hx: 1.82, hz: 0.92 };
@@ -15,10 +16,7 @@ let hudEl = null;
 
 const sounds = {};
 function loadSound(name, src, loop = false) {
-    const a = new Audio(src);
-    a.loop = loop;
-    a.preload = 'auto';
-    sounds[name] = a;
+    sounds[name] = createSound(src, { loop });
 }
 loadSound('pee', 'sfx/pee_stream.wav', true);
 loadSound('flush', 'sfx/toilet_flush.wav');

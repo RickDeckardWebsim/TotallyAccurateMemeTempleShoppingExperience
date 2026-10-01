@@ -10,7 +10,7 @@ import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
 import { createSound, setListener } from './src/audio-engine.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
-import { createCompatibleAudio as createCompatibleAudioExt, safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt } from './src/audio.js';
+import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
 import { addMagMartLogo3D } from './src/magmart-logo-3d.js';
 import { buildNavGrid, findPath, clampToWalkable, isWalkable, isLineWalkable } from './src/pathfinding.js';
@@ -734,6 +734,8 @@ function playFootstep() {
 const CART_BUMP_COOLDOWN = 1.5;
 /* @tweakable How much quieter each bump is than the one before it, within the cooldown */
 const CART_BUMP_FALLOFF = 0.75;
+/* @tweakable Loudness of the crash when a flung cart lands (the picked take is quiet next to the slip sound; above 1 boosts) */
+const CART_CRASH_BOOST = 2.5;
 // Bumping again and again (grinding along a shelf) gets quieter each time: 100%, 75%, 56%... until the cart
 // has gone CART_BUMP_COOLDOWN seconds without a bump.
 let cartBumpRun = 0, lastCartBumpAt = 0;
@@ -1169,16 +1171,14 @@ function pauseOtherMusic(keep) {
 }
 function retireMusic(el) {
     if (!el) return;
-    try { el.pause(); el.removeAttribute('src'); el.load(); } catch (_) {}
+    try { el.release(); } catch (_) {}
     musicTracks.delete(el);
 }
 
 // NEW: Initialize menu music once
 function initMenuMusicSingleton() {
     if (!menuMusic) {
-        menuMusic = new Audio('Shopping Spree Serenade.mp3');
-        menuMusic.loop = true;
-        menuMusic.volume = CONFIG.MUSIC_VOLUME;
+        menuMusic = createSound('Shopping Spree Serenade.mp3', { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
         registerMusic(menuMusic);
     } else {
         // keep existing instance; only update volume/mute to current config
@@ -1204,30 +1204,6 @@ function updateFps() {
         fpsFrames = 0;
         fpsLastTime = now;
     }
-}
-
-// Utility: create an Audio element from the first source the browser can play
-function createCompatibleAudio(sources) {
-    const audio = new Audio();
-    const test = new Audio();
-    const pickSrc = (src) => {
-        const ext = src.split('.').pop().toLowerCase();
-        let mime = '';
-        if (ext === 'mp3') mime = 'audio/mpeg';
-        else if (ext === 'wav') mime = 'audio/wav';
-        else if (ext === 'ogg') mime = 'audio/ogg';
-        else if (ext === 'opus') mime = 'audio/ogg; codecs=opus'; // best cross-browser chance
-        const canPlay = test.canPlayType(mime);
-        return canPlay && canPlay !== '';
-    };
-    for (const src of sources) {
-        if (pickSrc(src)) {
-            audio.src = src;
-            return audio;
-        }
-    }
-    // No supported sources; return an empty audio to avoid crashing on play()
-    return audio;
 }
 
 // Utility: safely play audio without unhandled promise rejections
@@ -4038,7 +4014,7 @@ muteBtn.textContent = '🔊';
 document.getElementById('game-container').appendChild(muteBtn);
 
 function playUIButtonSound(name) {
-    const source = soundEffects?.[name];
+    const source = UI_SOUNDS[name]; // (made with the page, so the main menu has them too)
     const sfxVolume = Math.max(0, Math.min(1, CONFIG.SFX_VOLUME ?? 0.7));
     if (!source || sfxVolume === 0) return;
     try {
@@ -4306,10 +4282,8 @@ function loadSounds() {
 
     // Initialize Mr. Resetti fail music (counted as music)
     try {
-        mrResettiMusic = new Audio('Mr. Resetti - Animal Crossing Wild World Soundtrack [TubeRipper.com].mp3');
+        mrResettiMusic = createSound('Mr. Resetti - Animal Crossing Wild World Soundtrack [TubeRipper.com].mp3', { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
         registerMusic(mrResettiMusic);
-        mrResettiMusic.loop = true;
-        mrResettiMusic.volume = CONFIG.MUSIC_VOLUME;
         mrResettiMusic.muted = musicMuted;
     } catch (_) {}
 }
@@ -4986,9 +4960,8 @@ function startCustomerScuffle(first, second) {
     }
     displayMessage("💢 Two customers are fighting and throwing groceries!", 4200, true);
     if (!customerScuffleMusic) {
-        customerScuffleMusic = new Audio('20260418_Mii Fight - Tomodachi Life： Living the Dream [OST].wav');
+        customerScuffleMusic = createSound('20260418_Mii Fight - Tomodachi Life： Living the Dream [OST].mp3', { stream: true, loop: true });
         registerMusic(customerScuffleMusic);
-        customerScuffleMusic.loop = true;
     }
     customerScuffleMusic.volume = 0;
     customerScuffleMusic.muted = musicMuted;
@@ -16124,7 +16097,7 @@ function animate() {
             // the cart crashing back down (the picked crash, where the cart lands)
             const crash = soundEffects?.cartCrash;
             if (crash) {
-                try { const c = crash.cloneNode(); c.setPosition?.(cartObject.position.x, 0.5, cartObject.position.z); c.volume = CONFIG.SFX_VOLUME ?? 0.7; c.play().catch(() => {}); } catch (_) {}
+                try { const c = crash.cloneNode(); c.setPosition?.(cartObject.position.x, 0.5, cartObject.position.z); c.volume = (CONFIG.SFX_VOLUME ?? 0.7) * CART_CRASH_BOOST; c.play().catch(() => {}); } catch (_) {}
             }
         }
     }
@@ -19675,6 +19648,7 @@ function init() {
     fpsOverlay.style.display = CONFIG.SHOW_FPS ? 'block' : 'none';
 
     window.triggerWifeCallEvent = triggerWifeCallEvent;
+    window.triggerTrip = triggerTrip;
     window.triggerEarthquakeEvent = triggerEarthquakeEvent;
     window.triggerThermostatMalfunction = triggerThermostatMalfunction;
     window.activateCurrentPowerup = activateCurrentPowerup;

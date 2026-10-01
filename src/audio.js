@@ -2,27 +2,10 @@ import { CONFIG } from '../config.js';
 import { createSound, preloadSounds } from './audio-engine.js';
 import { SOUND_PICKS } from './sound-picks.js';
 
-export function createCompatibleAudio(sources) {
-  const audio = new Audio();
-  const test = new Audio();
-  const pickSrc = (src) => {
-    const ext = src.split('.').pop().toLowerCase();
-    let mime = '';
-    if (ext === 'mp3') mime = 'audio/mpeg';
-    else if (ext === 'wav') mime = 'audio/wav';
-    else if (ext === 'ogg') mime = 'audio/ogg';
-    else if (ext === 'opus') mime = 'audio/ogg; codecs=opus';
-    const canPlay = test.canPlayType(mime);
-    return canPlay && canPlay !== '';
-  };
-  for (const src of sources) {
-    if (pickSrc(src)) {
-      audio.src = src;
-      return audio;
-    }
-  }
-  return audio;
-}
+// Button hover/click sounds: made with the page (not with a run), so the main menu has them too
+export const UI_SOUNDS = { uiHover: createSound('sfx/ui_hover.wav'), uiClick: createSound('sfx/ui_click.wav') };
+UI_SOUNDS.uiHover.volume = CONFIG.SFX_VOLUME * 0.55;
+UI_SOUNDS.uiClick.volume = CONFIG.SFX_VOLUME * 0.8;
 
 export async function safePlay(audio) {
   if (!audio || !audio.src) return;
@@ -56,15 +39,13 @@ export function loadSounds({ musicMuted = false } = {}) {
   // Pick background music
   const musicFiles = [
     'Shopping.mp3',
-    'Cruisin Elavator.wav',
+    'Cruisin Elavator.mp3',
     'Convenience Store.mp3',
     '28. eShop - Menu (Track 3).mp3',
     "Animal Crossing City Folk OST '11 AM (Normal)' (1).mp3"
   ];
   const chosenMusicFile = musicFiles[Math.floor(Math.random() * musicFiles.length)];
-  const music = new Audio(chosenMusicFile);
-  music.loop = true;
-  music.volume = CONFIG.MUSIC_VOLUME;
+  const music = createSound(chosenMusicFile, { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
   music.muted = musicMuted;
 
   // Footstep (replacement already wired to FOOT3.mp3)
@@ -88,7 +69,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.wrongItem = createSound('run.wav'); soundEffects.wrongItem.volume = CONFIG.SFX_VOLUME;
 
   soundEffects.cashRegister = createSound('Cash_Register_Open_01.wav'); soundEffects.cashRegister.volume = CONFIG.SFX_VOLUME;
-  soundEffects.policeSiren = createSound('20120126_Police Siren Sound Effect.wav', { stream: true }); soundEffects.policeSiren.volume = CONFIG.SFX_VOLUME;
+  soundEffects.policeSiren = createSound('20120126_Police Siren Sound Effect.mp3', { stream: true }); soundEffects.policeSiren.volume = CONFIG.SFX_VOLUME;
   soundEffects.productSpill = createSound('20200624_Cartoon Splat sound effect.wav'); soundEffects.productSpill.volume = CONFIG.SFX_VOLUME;
   soundEffects.checkoutScan = createSound('beep2.mp3'); soundEffects.checkoutScan.volume = CONFIG.SFX_VOLUME;
   soundEffects.itemRemoved = createSound('Kerplunk.wav'); soundEffects.itemRemoved.volume = CONFIG.SFX_VOLUME;
@@ -96,8 +77,8 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.shelfCrash = createSound('crash.wav'); soundEffects.shelfCrash.volume = CONFIG.SFX_VOLUME;
   soundEffects.customerQuestion = createSound('villager.mp3'); soundEffects.customerQuestion.volume = CONFIG.SFX_VOLUME;
 
-  // Baby crying loop (with compatibility)
-  soundEffects.babyCry = createSound(createCompatibleAudio(['BABYCRY.mp3.opus', 'beep2.mp3']).src, { stream: true });
+  // Baby crying loop (in the pack, which every browser can play; on its own, .opus needs a recent Safari)
+  soundEffects.babyCry = createSound('BABYCRY.mp3.opus');
   soundEffects.babyCry.volume = CONFIG.SFX_VOLUME;
   soundEffects.babyCry.loop = true;
 
@@ -126,10 +107,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.textChime.volume = CONFIG.SFX_VOLUME;
 
   // Soft UI sounds used by the shared button hover/click handlers.
-  soundEffects.uiHover = createSound('sfx/ui_hover.wav');
-  soundEffects.uiHover.volume = CONFIG.SFX_VOLUME * 0.55;
-  soundEffects.uiClick = createSound('sfx/ui_click.wav');
-  soundEffects.uiClick.volume = CONFIG.SFX_VOLUME * 0.8;
+  Object.assign(soundEffects, UI_SOUNDS);
 
   // Earthquake rumble SFX
   soundEffects.earthquake = createSound('sfx/earthquake.wav', { stream: true });
@@ -186,7 +164,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   if (SOUND_PICKS['cart-bump']) { soundEffects.cartBump = createSound(SOUND_PICKS['cart-bump'].src); soundEffects.cartBump.volume = CONFIG.SFX_VOLUME; }
 
   // The cart crashing back down after being flung (tripping); spatial, placed where it lands
-  if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 4, maxDistance: 60 } });
+  if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 6, maxDistance: 60 } });
 
   // Grabbing / letting go of the cart handle (F)
   if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);

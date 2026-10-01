@@ -1,16 +1,17 @@
-// Spectator audio. The game plays its sounds through <audio> elements using
+// Spectator audio. The game plays its sounds through the audio engine using
 // the project's own files, so rather than streaming raw audio we mirror the
 // player's playback state (which file, position, volume, loop, rate) and the
 // spectator plays the same files locally, in sync, at full quality.
 
 import { net } from './net.js';
+import { createSound, isPacked, tapSounds } from '../audio-engine.js';
 import { isStreaming } from './broadcast.js';
 import { isRecording, recordAudio } from './recorder.js';
 
 // ------------------------------------------------------------- broadcaster
 const ids = new WeakMap();
-const active = new Set();   // elements that played since they were last reported
-const paused = new Set();   // elements paused by the game (not naturally ended)
+const active = new Set();   // sounds that played since they were last reported
+const paused = new Set();   // sounds paused by the game (not naturally ended)
 let nextId = 1;
 let dirty = false;
 let lastSent = 0;
@@ -25,7 +26,7 @@ function idOf(el) {
 // Send the path the game used (e.g. "Shopping.mp3") so the spectator's page
 // resolves it exactly like the player's page did, whatever host serves assets.
 function shareableSrc(el) {
-    const raw = el.getAttribute('src') || el.currentSrc || el.src || '';
+    const raw = el.src || '';
     if (!raw || raw.startsWith('blob:')) return null;
     return raw.length > 600 ? null : raw;
 }
@@ -38,34 +39,29 @@ function safeMirrorUrl(s) {
     } catch (_) { return null; }
 }
 
-function isMirror(el) { return el.dataset && el.dataset.ssMirror === '1'; }
-
-const origPlay = HTMLMediaElement.prototype.play;
-HTMLMediaElement.prototype.play = function (...args) {
-    // While spectating, the spectator's own game/menu audio stays silent.
-    if (mirrorTarget && !isMirror(this)) {
-        if (!pausedLocal.includes(this)) pausedLocal.push(this);
-        return Promise.resolve();
-    }
-    if (!(this instanceof HTMLVideoElement) && !isMirror(this)) {
-        idOf(this);
-        active.add(this);
-        paused.delete(this);
+// Every engine sound's play and pause comes through here (mirrors excluded).
+tapSounds({
+    play(el) {
+        // While spectating, the spectator's own game/menu audio stays silent.
+        if (mirrorTarget) {
+            if (!pausedLocal.includes(el)) pausedLocal.push(el);
+            return false;
+        }
+        idOf(el);
+        active.add(el);
+        paused.delete(el);
         dirty = true;
-    }
-    return origPlay.apply(this, args);
-};
-const origPause = HTMLMediaElement.prototype.pause;
-HTMLMediaElement.prototype.pause = function (...args) {
-    if (active.has(this)) { paused.add(this); dirty = true; }
-    return origPause.apply(this, args);
-};
+    },
+    pause(el) {
+        if (active.has(el)) { paused.add(el); dirty = true; }
+    },
+});
 
 function snapshot() {
     const playing = [];
     const stopped = [];
     for (const el of active) {
-        if (!el.paused && !el.ended) {
+        if (!el.paused) {
             const s = shareableSrc(el);
             if (!s) continue;
             playing.push({
@@ -107,7 +103,7 @@ net.onFrame((now) => {
 });
 
 // ------------------------------------------------------------- spectator
-const mirrors = new Map(); // remote id -> <audio>
+const mirrors = new Map(); // remote id -> sound
 let mirrorTarget = null;
 let pausedLocal = [];      // the spectator's own sounds (menu music) paused while watching
 
@@ -115,7 +111,7 @@ function stopMirror(id) {
     const el = mirrors.get(id);
     if (!el) return;
     mirrors.delete(id);
-    try { origPause.call(el); el.removeAttribute('src'); el.load(); } catch (_) {}
+    try { el.pause(); el.release?.(); } catch (_) {}
 }
 
 export function startAudioMirror(targetId) {
@@ -123,11 +119,8 @@ export function startAudioMirror(targetId) {
     mirrorTarget = targetId;
     // Silence the spectator's own menu audio so only the player's game is heard.
     pausedLocal = [];
-    document.querySelectorAll('audio, video').forEach(el => {
-        if (!isMirror(el) && !el.paused) { pausedLocal.push(el); origPause.call(el); }
-    });
     for (const el of active) {
-        if (!el.paused && !pausedLocal.includes(el)) { pausedLocal.push(el); origPause.call(el); }
+        if (!el.paused) { pausedLocal.push(el); el.pause(); }
     }
 }
 
@@ -135,7 +128,7 @@ export function stopAudioMirror() {
     mirrorTarget = null;
     [...mirrors.keys()].forEach(stopMirror);
     // Only resume looping audio (menu music); one-shot UI sounds stay stopped.
-    pausedLocal.forEach(el => { if (el.loop) { try { origPlay.call(el).catch(() => {}); } catch (_) {} } });
+    pausedLocal.forEach(el => { if (el.loop) { try { el.play().catch(() => {}); } catch (_) {} } });
     pausedLocal = [];
 }
 
@@ -145,7 +138,7 @@ let blocked = false;
 function unlock() {
     if (!blocked || !mirrorTarget) return;
     blocked = false;
-    for (const el of mirrors.values()) if (el.paused) origPlay.call(el).catch(() => {});
+    for (const el of mirrors.values()) if (el.paused) el.play().catch(() => {});
 }
 window.addEventListener('pointerdown', unlock, true);
 window.addEventListener('keydown', unlock, true);
@@ -156,8 +149,8 @@ export function clearMirrors() { [...mirrors.keys()].forEach(stopMirror); }
 // Pause/resume mirrored sounds in place (replay pause).
 export function holdMirrors(hold) {
     for (const el of mirrors.values()) {
-        if (hold) origPause.call(el);
-        else origPlay.call(el).catch(() => {});
+        if (hold) el.pause();
+        else el.play().catch(() => {});
     }
 }
 
@@ -176,16 +169,13 @@ export function applyAudioSnapshot(a, ahead = 0) {
         const src = safeMirrorUrl(a.s);
         if (!src) continue;
         let el = mirrors.get(a.i);
-        if (el && el.dataset.ssSrc !== src) { stopMirror(a.i); el = null; }
+        if (el && el.src !== src) { stopMirror(a.i); el = null; }
         const t = (Number(a.t) || 0) + ahead * (Number(a.r) || 1);
         if (!el) {
-            el = new Audio();
-            el.dataset.ssMirror = '1';
-            el.dataset.ssSrc = src;
-            el.src = src;
-            el.preload = 'auto';
+            el = createSound(src, { stream: !isPacked(src) });
+            el.mirror = true;
             mirrors.set(a.i, el);
-            el.addEventListener('ended', () => { if (mirrors.get(a.i) === el) mirrors.delete(a.i); });
+            el.onended = () => { if (mirrors.get(a.i) === el) mirrors.delete(a.i); };
             try { el.currentTime = t; } catch (_) {}
         } else if (Math.abs(el.currentTime - t) > 0.4 && (a.l || t < (el.duration || Infinity))) {
             // Resync long tracks that drifted (music, ambience loops).
@@ -194,7 +184,7 @@ export function applyAudioSnapshot(a, ahead = 0) {
         el.volume = Math.max(0, Math.min(1, Number(a.v) || 0));
         el.loop = !!a.l;
         el.playbackRate = Number(a.r) || 1;
-        if (el.paused) origPlay.call(el).catch((e) => {
+        if (el.paused) el.play().catch((e) => {
             if (e && e.name === 'NotAllowedError') blocked = true;
         });
     }

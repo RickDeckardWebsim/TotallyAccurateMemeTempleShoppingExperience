@@ -1,12 +1,13 @@
-// Sound effects through one Web Audio graph instead of a separate <audio> element each.
+// Every sound in the game goes through one Web Audio graph instead of a separate <audio> element each.
 //
 // createSound(src) returns an object that answers the same calls the game already makes on an
 // <audio> element (play, pause, currentTime, volume, loop, muted, paused, cloneNode), so code
 // that plays sounds doesn't change. What's different underneath:
-//  - Short sounds are decoded once per file and played from that buffer: the same sound can
-//    overlap itself (cloneNode is cheap), and starting one has no network or decode delay after
-//    the first time.
-//  - Long sounds ({stream: true}: drones, ambience, sirens) still stream from an <audio>
+//  - Short sounds all live in one file, sfx/pack.mp3 (tools/pack-sfx.mjs builds it; src/sfx-pack.js
+//    says where each sound is in it). It's fetched and decoded once, as the page loads; each sound
+//    plays its stretch of it. The same sound can overlap itself (cloneNode is cheap), and starting
+//    one has no network or decode delay. A sound that isn't in the pack yet loads its own file.
+//  - Long sounds ({stream: true}: music, drones, ambience, sirens) still stream from an <audio>
 //    element, but routed through a gain node, so they don't sit decoded in memory.
 //  - Volume is a gain node in both cases. iPhones ignore <audio>.volume entirely (every sound
 //    plays at full level there, fades and distance included); a gain node works everywhere.
@@ -17,9 +18,15 @@
 //  - Everything meets in one bus with a limiter, so a pile-up of sounds can't clip.
 // Browsers keep audio silent until the first tap or key press; unlock() runs on those.
 
+import { SFX_PACK } from './sfx-pack.js';
+
 const AC = window.AudioContext || window.webkitAudioContext;
 const ctx = AC ? new AC() : null;
 let bus = null;
+let gestureAt = -1e9; // the last tap or key press (what lets a browser start audio)
+// Audio still locked (no tap or key press yet): a one-shot would only come out late, piled up with the
+// others, once it unlocks. Those are skipped; loops and music wait and start then.
+const locked = () => ctx.state !== 'running' && performance.now() - gestureAt > 1000;
 const POOLS = { plain: { cap: 32, live: [] }, spatial: { cap: 24, live: [] } };
 if (ctx) {
     const limiter = ctx.createDynamicsCompressor();
@@ -29,22 +36,56 @@ if (ctx) {
     bus = ctx.createGain();
     bus.connect(limiter);
     if (/[?&]mute\b/.test(location.search)) bus.gain.value = 0; // ?mute: silent (automated tests)
-    const unlock = () => { if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
+    const unlock = () => { gestureAt = performance.now(); if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) addEventListener(ev, unlock, true);
 }
 
 // One decode per file, shared by every sound (and clone) that plays it.
-const buffers = new Map();
-function bufferFor(src) {
-    if (!buffers.has(src)) {
+const decoded = new Map();
+function decode(src) {
+    if (!decoded.has(src)) {
         const p = fetch(src)
             .then(r => { if (!r.ok) throw new Error(`${r.status} ${src}`); return r.arrayBuffer(); })
             .then(b => new Promise((ok, fail) => ctx.decodeAudioData(b, ok, fail)));
-        p.catch(() => buffers.delete(src)); // a failed load can be tried again later
-        buffers.set(src, p);
+        p.catch(() => decoded.delete(src)); // a failed load can be tried again later
+        decoded.set(src, p);
     }
-    return buffers.get(src);
+    return decoded.get(src);
 }
+const href = (src) => { try { return new URL(src, document.baseURI).href; } catch (_) { return src; } };
+// The pack: {src, mark, sounds: {path: [start, duration]}} in seconds. Decoders may shift the whole file
+// by a few ms (MP3 start padding, which browsers trim differently), so the pack starts with a click at
+// `mark` seconds; where it's found in the decoded audio says how far everything moved.
+const packed = new Map(Object.entries(SFX_PACK?.sounds || {}).map(([k, v]) => [href(k), v]));
+let pack = null;
+function loadPack() {
+    return pack ||= decode(SFX_PACK.src).then(b => {
+        const x = b.getChannelData(0), end = Math.min(x.length, b.sampleRate);
+        let i = 0; while (i < end && Math.abs(x[i]) < 0.3) i++;
+        return { b, shift: i < end ? i / b.sampleRate - SFX_PACK.mark : 0 };
+    });
+}
+if (ctx && packed.size) loadPack().catch(() => {});
+/** Is this file in the pack (played from memory) rather than a file of its own? */
+export function isPacked(src) { return packed.has(href(src)); }
+// Where a sound's audio is: {b: buffer, start, dur} (a stretch of the pack, or all of its own file)
+const segments = new Map();
+function segmentFor(src) {
+    if (!segments.has(src)) {
+        const at = packed.get(href(src));
+        const p = at ? loadPack().then(({ b, shift }) => ({ b, start: Math.max(0, at[0] + shift), dur: at[1] }))
+            : decode(src).then(b => ({ b, start: 0, dur: b.duration }));
+        p.catch(() => segments.delete(src));
+        segments.set(src, p);
+    }
+    return segments.get(src);
+}
+
+// Spectating and replays are told about every play and pause (tapSounds); while watching someone,
+// tap.play returns false and the viewer's own sounds stay quiet.
+let tap = null;
+export function tapSounds(t) { tap = t; }
+const MAX_VOLUME = 4; // above 1 boosts (the bus limiter keeps it from clipping)
 
 function fadeOut(v) {
     for (const p of Object.values(POOLS)) { const k = p.live.indexOf(v); if (k >= 0) p.live.splice(k, 1); }
@@ -84,7 +125,7 @@ class BufferSound {
     }
     get volume() { return this._volume; }
     set volume(v) {
-        this._volume = Math.max(0, Math.min(1, +v || 0));
+        this._volume = Math.max(0, Math.min(MAX_VOLUME, +v || 0));
         if (this._voice) this._voice.gain.gain.setTargetAtTime(this._level(), ctx.currentTime, 0.015);
     }
     get muted() { return this._muted; }
@@ -93,8 +134,8 @@ class BufferSound {
     get currentTime() {
         const v = this._voice;
         if (!v) return this._offset;
-        const t = v.offset + (ctx.currentTime - v.startedAt);
-        return this.loop && v.source.buffer ? t % v.source.buffer.duration : Math.min(t, v.source.buffer?.duration ?? t);
+        const t = v.offset + (ctx.currentTime - v.startedAt) * this._rate;
+        return this.loop ? t % v.dur : Math.min(t, v.dur);
     }
     set currentTime(t) {
         this._offset = Math.max(0, +t || 0);
@@ -104,21 +145,25 @@ class BufferSound {
         if (!ctx) return Promise.resolve();
         if (ctx.state !== 'running') ctx.resume().catch(() => {});
         if (!this.paused && this._voice) return Promise.resolve();
+        if (tap && !this.mirror && tap.play(this) === false) return Promise.resolve();
         this.paused = false;
         const ticket = ++this._want;
-        return bufferFor(this.src).then(() => { if (ticket === this._want && !this.paused && !this._voice) this._start(); }, () => { this.paused = true; });
+        return segmentFor(this.src).then(() => { if (ticket === this._want && !this.paused && !this._voice) this._start(); }, () => { this.paused = true; });
     }
     pause() {
+        if (tap && !this.mirror && !this.paused) tap.pause(this);
         this._want++;
         if (this._voice) { this._offset = this.currentTime; this._stopVoice(); }
         this.paused = true;
     }
     cloneNode() { const c = new BufferSound(this.src, { loop: this.loop, volume: this._volume, spatial: this.spatial, position: this.position }); c.muted = this._muted; return c; }
     _start() {
-        bufferFor(this.src).then(b => {
+        segmentFor(this.src).then(({ b, start, dur }) => {
             if (this.paused || this._voice) return;
+            if (!this.loop && locked()) { this.paused = true; return; }
             const source = ctx.createBufferSource(), gain = ctx.createGain();
-            source.buffer = b; source.loop = this.loop; this._duration = b.duration; source.playbackRate.value = this._rate;
+            source.buffer = b; this._duration = dur; source.playbackRate.value = this._rate;
+            if (this.loop) { source.loop = true; source.loopStart = start; source.loopEnd = start + dur; }
             gain.gain.value = this._level();
             source.connect(gain);
             let panner = null;
@@ -130,16 +175,17 @@ class BufferSound {
                 setPos(panner, this.position);
                 gain.connect(panner); panner.connect(bus);
             } else gain.connect(bus);
-            const offset = this._offset >= b.duration ? 0 : this._offset;
-            const voice = { source, gain, panner, startedAt: ctx.currentTime, offset, owner: this };
+            const offset = this._offset >= dur ? 0 : this._offset;
+            const voice = { source, gain, panner, startedAt: ctx.currentTime, offset, dur, owner: this };
             const pool = POOLS[this.spatial ? 'spatial' : 'plain'];
             source.onended = () => {
                 const k = pool.live.indexOf(voice); if (k >= 0) pool.live.splice(k, 1);
                 if (this._voice !== voice) return;
-                this._voice = null; this.paused = true; this._offset = b.duration; // as <audio> does at its end
+                this._voice = null; this.paused = true; this._offset = dur; // as <audio> does at its end
                 try { gain.disconnect(); panner?.disconnect(); } catch (_) {}
+                this.onended?.();
             };
-            source.start(0, offset);
+            if (this.loop) source.start(0, start + offset); else source.start(0, start + offset, dur - offset);
             this._voice = voice;
             // full pool: the oldest voice in it makes room
             pool.live.push(voice);
@@ -157,9 +203,10 @@ class BufferSound {
     playSlice(start, end, { rate = 1 } = {}) {
         if (!ctx) return;
         if (ctx.state !== 'running') ctx.resume().catch(() => {});
-        bufferFor(this.src).then(b => {
+        segmentFor(this.src).then(({ b, start: at, dur }) => {
+            if (locked()) return;
             const source = ctx.createBufferSource(), gain = ctx.createGain(), t = ctx.currentTime;
-            const from = Math.max(0, Math.min(start, b.duration - 0.01)), span = Math.max(0.01, Math.min(end, b.duration) - from), len = span / rate;
+            const from = Math.max(0, Math.min(start, dur - 0.01)), span = Math.max(0.01, Math.min(end, dur) - from), len = span / rate;
             source.buffer = b; source.playbackRate.value = rate;
             gain.gain.setValueAtTime(this._level(), t);
             gain.gain.setValueAtTime(this._level(), t + len * 0.85);
@@ -167,7 +214,7 @@ class BufferSound {
             source.connect(gain); gain.connect(bus);
             const voice = { source, gain, panner: null, owner: { _voice: null } }, pool = POOLS.plain;
             source.onended = () => { const k = pool.live.indexOf(voice); if (k >= 0) pool.live.splice(k, 1); try { gain.disconnect(); } catch (_) {} };
-            source.start(t, from, span);
+            source.start(t, at + from, span);
             pool.live.push(voice);
             while (pool.live.length > pool.cap) { const old = pool.live.shift(); old.owner._voice === old ? old.owner.pause() : fadeOut(old); }
         }).catch(() => {});
@@ -204,7 +251,7 @@ class StreamSound {
         else this.el.volume = level;
     }
     get volume() { return this._volume; }
-    set volume(v) { this._volume = Math.max(0, Math.min(1, +v || 0)); this._apply(); }
+    set volume(v) { this._volume = Math.max(0, Math.min(this.gain ? MAX_VOLUME : 1, +v || 0)); this._apply(); }
     get muted() { return this._muted; }
     set muted(m) { this._muted = !!m; this._apply(); }
     get loop() { return this.el.loop; }
@@ -213,15 +260,27 @@ class StreamSound {
     get duration() { return this.el.duration; }
     get currentTime() { return this.el.currentTime; }
     set currentTime(t) { try { this.el.currentTime = t; } catch (_) {} }
-    play() { if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); return this.el.play(); }
-    pause() { this.el.pause(); }
+    get playbackRate() { return this.el.playbackRate; }
+    set playbackRate(r) { this.el.playbackRate = r; }
+    set onended(f) { this.el.onended = f; }
+    play() {
+        if (tap && !this.mirror && tap.play(this) === false) return Promise.resolve();
+        if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+        return this.el.play();
+    }
+    pause() { if (tap && !this.mirror && !this.el.paused) tap.pause(this); this.el.pause(); }
     cloneNode() { const c = new StreamSound(this.src, { loop: this.loop, volume: this._volume }); c.muted = this._muted; return c; }
+    /** Done with it: stop downloading and let it go. */
+    release() {
+        this.pause();
+        try { this.el.removeAttribute('src'); this.el.load(); this.gain?.disconnect(); } catch (_) {}
+    }
 }
 
-/** A sound for `src`. opts: {volume, loop, stream} — stream for long sounds (ambience, drones). */
+/** A sound for `src`. opts: {volume, loop, stream, spatial, position} — stream for long sounds (music, ambience). */
 export function createSound(src, opts = {}) {
-    if (!ctx) { const a = new Audio(src); a.loop = !!opts.loop; a.volume = opts.volume ?? 1; return a; }
-    return opts.stream ? new StreamSound(src, opts) : new BufferSound(src, opts);
+    if (!ctx) { const a = new Audio(src); a.loop = !!opts.loop; a.volume = Math.min(1, opts.volume ?? 1); a.release = () => { a.pause(); a.removeAttribute('src'); a.load(); }; return a; }
+    return opts.stream && !isPacked(src) ? new StreamSound(src, opts) : new BufferSound(src, opts);
 }
 
 /** The ears: where the camera is and which way it faces (call once a frame). */
@@ -243,6 +302,6 @@ export function setListener(camera) {
 let _tmpV = null;
 
 /** Decode these now, so their first play has no delay. */
-export function preloadSounds(srcs) { if (ctx) for (const s of srcs) bufferFor(s).catch(() => {}); }
+export function preloadSounds(srcs) { if (ctx) for (const s of srcs) segmentFor(s).catch(() => {}); }
 
 export const audioContext = ctx;
