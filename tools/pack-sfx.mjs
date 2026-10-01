@@ -19,8 +19,8 @@ const RATE = 48000, KBPS = 128;
 const GAP = 0.05;   // silence between sounds (seconds), so one never bleeds into the next
 const MARK = 0.05;  // where the alignment click sits in every file (see the engine's loadPack)
 // MP3 smears the first and last few ms of a sound that sits next to silence, which a loop would play at its
-// seam every time round; so a loop goes in with WRAP seconds of its own tail before it and its own head after
-// it, and the encoder sees the seam as the continuous audio it is when looping.
+// seam every time round; so every sound goes in with WRAP seconds of its own tail before it and its own head
+// after it (any of them may be looped), and the encoder sees the seam as the continuous audio it is.
 const WRAP = 0.05;
 
 // The core pack: the sounds a normal run uses (cart, items, footsteps, doors, UI, checkout).
@@ -33,11 +33,8 @@ const CORE = [
 ];
 // the soundboard picks (src/sound-picks.js) and every item's drop
 const picks = fs.readFileSync(path.join(ROOT, 'src/sound-picks.js'), 'utf8').match(/SOUND_PICKS = (\{[\s\S]*\});/);
-const PICKS = picks ? JSON.parse(picks[1]) : {};
-for (const v of Object.values(PICKS)) if (!CORE.includes(v.src)) CORE.push(v.src);
+for (const v of Object.values(picks ? JSON.parse(picks[1]) : {})) if (!CORE.includes(v.src)) CORE.push(v.src);
 for (const f of fs.readdirSync(path.join(ROOT, 'sfx/drops')).sort()) if (/\.(mp3|wav|ogg)$/.test(f) && !CORE.includes('sfx/drops/' + f)) CORE.push('sfx/drops/' + f);
-// the core sounds the game loops (wrapped, above)
-const LOOPED = new Set(['cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'npc-cart-roll'].map((j) => PICKS[j]?.src));
 
 // Event sounds: every other WAV/OGG/Opus file the code names (music and other MP3s stream as they are)
 const code = ['game.js', ...fs.readdirSync(path.join(ROOT, 'src'), { recursive: true }).filter((f) => f.endsWith('.js') && f !== 'sfx-pack.js').map((f) => 'src/' + f)]
@@ -62,7 +59,7 @@ function decode(file) {
 
 const sounds = {};
 // Writes these sounds into one MP3 (the click first, then each sound) and notes where each one is.
-function build(out, files, wrapped) {
+function build(out, files) {
     const parts = [];
     let at = 0;
     const push = (x) => { parts.push(x); at += x.length; };
@@ -73,11 +70,11 @@ function build(out, files, wrapped) {
     for (const rel of files) {
         const file = path.join(ROOT, rel);
         if (!fs.existsSync(file)) { console.warn('missing, skipped:', rel); continue; }
-        const x = decode(file), w = wrapped(rel) ? Math.min(x.length, Math.round(WRAP * RATE)) : 0;
-        if (w) push(x.slice(x.length - w));
+        const x = decode(file), w = Math.min(x.length, Math.round(WRAP * RATE));
+        push(x.slice(x.length - w));
         sounds[rel] = [out, +(at / RATE).toFixed(5), +(x.length / RATE).toFixed(5)];
         push(x);
-        if (w) push(x.slice(0, w));
+        push(x.slice(0, w));
         silence(GAP);
     }
     const pcm = new Int16Array(at);
@@ -91,7 +88,7 @@ function build(out, files, wrapped) {
     return bytes.length;
 }
 
-const core = build('sfx/pack.mp3', CORE, (f) => LOOPED.has(f));
+const core = build('sfx/pack.mp3', CORE);
 console.log(`sfx/pack.mp3: ${CORE.length} sounds, ${(core / 1048576).toFixed(2)} MB`);
 const DIR = 'sfx/packed', made = new Set();
 fs.mkdirSync(path.join(ROOT, DIR), { recursive: true });
@@ -100,7 +97,7 @@ for (const rel of EVENTS) {
     const name = path.basename(rel).replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_') + '.mp3';
     if (made.has(name)) throw new Error(`two sounds would both be ${DIR}/${name}: rename one`);
     made.add(name);
-    events += build(`${DIR}/${name}`, [rel], () => true); // (any of them may loop)
+    events += build(`${DIR}/${name}`, [rel]);
     before += fs.statSync(path.join(ROOT, rel)).size;
 }
 for (const f of fs.readdirSync(path.join(ROOT, DIR))) if (!made.has(f)) fs.rmSync(path.join(ROOT, DIR, f)); // (no longer used)

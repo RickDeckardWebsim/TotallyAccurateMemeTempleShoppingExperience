@@ -26,10 +26,9 @@ import { SFX_PACK } from './sfx-pack.js';
 const AC = window.AudioContext || window.webkitAudioContext;
 const ctx = AC ? new AC() : null;
 let bus = null;
-let gestureAt = -1e9; // the last tap or key press (what lets a browser start audio)
-// Audio still locked (no tap or key press yet): a one-shot would only come out late, piled up with the
-// others, once it unlocks. Those are skipped; loops and music wait and start then.
-const locked = () => ctx.state !== 'running' && performance.now() - gestureAt > 1000;
+// Audio still locked (before the first tap or key press): a one-shot would only come out late, piled up with
+// the others, once it unlocks. Those are skipped; loops and music wait and start then.
+const locked = () => ctx.state !== 'running';
 const POOLS = { plain: { cap: 32, live: [] }, spatial: { cap: 24, live: [] } };
 if (ctx) {
     const limiter = ctx.createDynamicsCompressor();
@@ -39,7 +38,7 @@ if (ctx) {
     bus = ctx.createGain();
     bus.connect(limiter);
     if (/[?&]mute\b/.test(location.search)) bus.gain.value = 0; // ?mute: silent (automated tests)
-    const unlock = () => { gestureAt = performance.now(); if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
+    const unlock = () => { if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) addEventListener(ev, unlock, true);
 }
 
