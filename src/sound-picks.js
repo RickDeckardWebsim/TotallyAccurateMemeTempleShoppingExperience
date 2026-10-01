@@ -159,7 +159,7 @@ export const SOUND_PICKS = {
  },
  "drop-batteries": {
   "src": "sfx/drops/batteries.mp3",
-  "take": "drop-batteries/el-drop-batteries-plain",
+  "take": "drop-batteries/el-drop-batteries-form",
   "auto": true
  },
  "drop-bread": {
@@ -169,7 +169,7 @@ export const SOUND_PICKS = {
  },
  "drop-canned-goods": {
   "src": "sfx/drops/canned-goods.mp3",
-  "take": "drop-canned-goods/el-drop-canned-goods-plain",
+  "take": "drop-canned-goods/el-drop-canned-goods-form",
   "auto": true
  },
  "drop-cereal": {
@@ -178,42 +178,42 @@ export const SOUND_PICKS = {
  },
  "drop-cheese": {
   "src": "sfx/drops/cheese.mp3",
-  "take": "drop-cheese/el-drop-cheese-plain",
+  "take": "drop-cheese/el-drop-cheese-form",
   "auto": true
  },
  "drop-chewing-gum": {
   "src": "sfx/drops/chewing-gum.mp3",
-  "take": "drop-chewing-gum/el-drop-chewing-gum-plain",
+  "take": "drop-chewing-gum/el-drop-chewing-gum-form",
   "auto": true
  },
  "drop-chicken": {
   "src": "sfx/drops/chicken.mp3",
-  "take": "drop-chicken/el-drop-chicken-plain",
+  "take": "drop-chicken/el-drop-chicken-form",
   "auto": true
  },
  "drop-chocolate-bars": {
   "src": "sfx/drops/chocolate-bars.mp3",
-  "take": "drop-chocolate-bars/el-drop-chocolate-bars-plain",
+  "take": "drop-chocolate-bars/el-drop-chocolate-bars-form",
   "auto": true
  },
  "drop-cleaning-supplies": {
   "src": "sfx/drops/cleaning-supplies.mp3",
-  "take": "drop-cleaning-supplies/el-drop-cleaning-supplies-plain",
+  "take": "drop-cleaning-supplies/el-drop-cleaning-supplies-form",
   "auto": true
  },
  "drop-coffee": {
   "src": "sfx/drops/coffee.mp3",
-  "take": "drop-coffee/el-drop-coffee-plain",
+  "take": "drop-coffee/el-drop-coffee-form",
   "auto": true
  },
  "drop-cooking-oil": {
   "src": "sfx/drops/cooking-oil.mp3",
-  "take": "drop-cooking-oil/el-drop-cooking-oil-plain",
+  "take": "drop-cooking-oil/el-drop-cooking-oil-form",
   "auto": true
  },
  "drop-dog-food": {
   "src": "sfx/drops/dog-food.mp3",
-  "take": "drop-dog-food/el-drop-dog-food-plain",
+  "take": "drop-dog-food/el-drop-dog-food-form",
   "auto": true
  },
  "drop-eggs": {
@@ -222,27 +222,27 @@ export const SOUND_PICKS = {
  },
  "drop-flowers": {
   "src": "sfx/drops/flowers.mp3",
-  "take": "drop-flowers/el-drop-flowers-plain",
+  "take": "drop-flowers/el-drop-flowers-form",
   "auto": true
  },
  "drop-grapes": {
   "src": "sfx/drops/grapes.mp3",
-  "take": "drop-grapes/el-drop-grapes-plain",
+  "take": "drop-grapes/el-drop-grapes-form",
   "auto": true
  },
  "drop-ice-cream": {
   "src": "sfx/drops/ice-cream.mp3",
-  "take": "drop-ice-cream/el-drop-ice-cream-plain",
+  "take": "drop-ice-cream/el-drop-ice-cream-form",
   "auto": true
  },
  "drop-ketchup": {
   "src": "sfx/drops/ketchup.mp3",
-  "take": "drop-ketchup/el-drop-ketchup-plain",
+  "take": "drop-ketchup/el-drop-ketchup-form",
   "auto": true
  },
  "drop-lettuce": {
   "src": "sfx/drops/lettuce.mp3",
-  "take": "drop-lettuce/el-drop-lettuce-plain",
+  "take": "drop-lettuce/el-drop-lettuce-form",
   "auto": true
  },
  "drop-milk": {
@@ -251,87 +251,87 @@ export const SOUND_PICKS = {
  },
  "drop-mustard": {
   "src": "sfx/drops/mustard.mp3",
-  "take": "drop-mustard/el-drop-mustard-plain",
+  "take": "drop-mustard/el-drop-mustard-form",
   "auto": true
  },
  "drop-orange-juice": {
   "src": "sfx/drops/orange-juice.mp3",
-  "take": "drop-orange-juice/el-drop-orange-juice-plain",
+  "take": "drop-orange-juice/el-drop-orange-juice-form",
   "auto": true
  },
  "drop-pants": {
   "src": "sfx/drops/pants.mp3",
-  "take": "drop-pants/el-drop-pants-plain",
+  "take": "drop-pants/el-drop-pants-form",
   "auto": true
  },
  "drop-pasta-sauce": {
   "src": "sfx/drops/pasta-sauce.mp3",
-  "take": "drop-pasta-sauce/el-drop-pasta-sauce-plain",
+  "take": "drop-pasta-sauce/el-drop-pasta-sauce-form",
   "auto": true
  },
  "drop-pasta": {
   "src": "sfx/drops/pasta.mp3",
-  "take": "drop-pasta/el-drop-pasta-plain",
+  "take": "drop-pasta/el-drop-pasta-form",
   "auto": true
  },
  "drop-peanut-butter": {
   "src": "sfx/drops/peanut-butter.mp3",
-  "take": "drop-peanut-butter/el-drop-peanut-butter-plain",
+  "take": "drop-peanut-butter/el-drop-peanut-butter-form",
   "auto": true
  },
  "drop-pizza": {
   "src": "sfx/drops/pizza.mp3",
-  "take": "drop-pizza/el-drop-pizza-plain",
+  "take": "drop-pizza/el-drop-pizza-form",
   "auto": true
  },
  "drop-potatoes": {
   "src": "sfx/drops/potatoes.mp3",
-  "take": "drop-potatoes/el-drop-potatoes-plain",
+  "take": "drop-potatoes/el-drop-potatoes-form",
   "auto": true
  },
  "drop-shampoo": {
   "src": "sfx/drops/shampoo.mp3",
-  "take": "drop-shampoo/el-drop-shampoo-plain",
+  "take": "drop-shampoo/el-drop-shampoo-form",
   "auto": true
  },
  "drop-soda": {
   "src": "sfx/drops/soda.mp3",
-  "take": "drop-soda/el-drop-soda-plain",
+  "take": "drop-soda/el-drop-soda-form",
   "auto": true
  },
  "drop-steak": {
   "src": "sfx/drops/steak.mp3",
-  "take": "drop-steak/el-drop-steak-plain",
+  "take": "drop-steak/el-drop-steak-form",
   "auto": true
  },
  "drop-sugar": {
   "src": "sfx/drops/sugar.mp3",
-  "take": "drop-sugar/el-drop-sugar-plain",
+  "take": "drop-sugar/el-drop-sugar-form",
   "auto": true
  },
  "drop-toilet-paper": {
   "src": "sfx/drops/toilet-paper.mp3",
-  "take": "drop-toilet-paper/el-drop-toilet-paper-plain",
+  "take": "drop-toilet-paper/el-drop-toilet-paper-form",
   "auto": true
  },
  "drop-towels": {
   "src": "sfx/drops/towels.mp3",
-  "take": "drop-towels/el-drop-towels-plain",
+  "take": "drop-towels/el-drop-towels-form",
   "auto": true
  },
  "drop-toys": {
   "src": "sfx/drops/toys.mp3",
-  "take": "drop-toys/el-drop-toys-plain",
+  "take": "drop-toys/el-drop-toys-form",
   "auto": true
  },
  "drop-water-bottles": {
   "src": "sfx/drops/water-bottles.mp3",
-  "take": "drop-water-bottles/el-drop-water-bottles-plain",
+  "take": "drop-water-bottles/el-drop-water-bottles-form",
   "auto": true
  },
  "drop-watermelon": {
   "src": "sfx/drops/watermelon.mp3",
-  "take": "drop-watermelon/el-drop-watermelon-plain",
+  "take": "drop-watermelon/el-drop-watermelon-form",
   "auto": true
  }
 };
