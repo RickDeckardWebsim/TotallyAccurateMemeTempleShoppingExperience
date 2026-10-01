@@ -150,6 +150,28 @@ class BufferSound {
         const v = this._voice; this._voice = null;
         if (v) fadeOut(v);
     }
+    /**
+     * Play only [start, end) seconds of this sound, as an extra voice alongside anything it's playing
+     * (one footstep out of a file of them). rate: playback speed (pitch variation).
+     */
+    playSlice(start, end, { rate = 1 } = {}) {
+        if (!ctx) return;
+        if (ctx.state !== 'running') ctx.resume().catch(() => {});
+        bufferFor(this.src).then(b => {
+            const source = ctx.createBufferSource(), gain = ctx.createGain(), t = ctx.currentTime;
+            const from = Math.max(0, Math.min(start, b.duration - 0.01)), span = Math.max(0.01, Math.min(end, b.duration) - from), len = span / rate;
+            source.buffer = b; source.playbackRate.value = rate;
+            gain.gain.setValueAtTime(this._level(), t);
+            gain.gain.setValueAtTime(this._level(), t + len * 0.85);
+            gain.gain.linearRampToValueAtTime(0, t + len); // (a slice can end mid-sound: fade, don't click)
+            source.connect(gain); gain.connect(bus);
+            const voice = { source, gain, panner: null, owner: { _voice: null } }, pool = POOLS.plain;
+            source.onended = () => { const k = pool.live.indexOf(voice); if (k >= 0) pool.live.splice(k, 1); try { gain.disconnect(); } catch (_) {} };
+            source.start(t, from, span);
+            pool.live.push(voice);
+            while (pool.live.length > pool.cap) { const old = pool.live.shift(); old.owner._voice === old ? old.owner.pause() : fadeOut(old); }
+        }).catch(() => {});
+    }
     /** Where a spatial sound is ({x, y, z}); moves a voice that's playing too. */
     setPosition(x, y, z) {
         this.position = { x, y, z };

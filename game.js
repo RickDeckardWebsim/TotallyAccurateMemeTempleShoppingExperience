@@ -713,6 +713,21 @@ function updateCartRollingSound(rolling, speed = 0) {
     if (rough) rough.playbackRate = pitched('cart-roll-rough');
     if (squeak) { squeak.volume = Math.min(1, push * cartRollStuck); squeak.playbackRate = pitched('cart-stuck'); }
 }
+// One footstep: a random step (not the last one again) from the picked set for where you are (the store
+// floor or the parking lot), pitch varied a little. Without the picked sets: the old single footstep.
+let lastFootstep = -1;
+function playFootstep() {
+    const pos = playerBody?.position, inside = !pos || isInsideStore(pos.x, pos.z);
+    const job = inside ? 'steps-store' : 'steps-lot', set = SOUND_PICKS[job]?.steps, sound = soundEffects?.[inside ? 'stepsStore' : 'stepsLot'];
+    if (!set?.length || !sound?.playSlice) {
+        try { soundEffects.footstep.currentTime = 0; soundEffects.footstep.play(); } catch (_) {}
+        return;
+    }
+    let k = Math.floor(Math.random() * set.length);
+    if (k === lastFootstep && set.length > 1) k = (k + 1) % set.length;
+    lastFootstep = k;
+    sound.playSlice(set[k][0], set[k][1], { rate: 1 + (Math.random() * 2 - 1) * 0.03 });
+}
 // Grabbing or letting go of the cart handle: the picked handle sound (fallback: the old one, if any).
 function playCartHandleSound(fallback) {
     const sound = soundEffects?.cartHandle || fallback;
@@ -11429,8 +11444,7 @@ function setupEvents() {
             !soundEffects.footstep.playing &&
             playerBody.position.y < 1.1) {
 
-            soundEffects.footstep.currentTime = 0;
-            soundEffects.footstep.play();
+            playFootstep();
             soundEffects.footstep.playing = true;
 
             footstepCount++;

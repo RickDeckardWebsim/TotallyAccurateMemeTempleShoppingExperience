@@ -177,6 +177,11 @@ export function loadSounds({ musicMuted = false } = {}) {
     if (SOUND_PICKS[job]) soundEffects[name] = createSound(SOUND_PICKS[job].src, { loop: true, volume: 0 });
   }
 
+  // Footsteps: a file of single steps each (the store floor, the parking lot); game.js plays one at a time
+  for (const [name, job] of [['stepsStore', 'steps-store'], ['stepsLot', 'steps-lot']]) {
+    if (SOUND_PICKS[job]) { soundEffects[name] = createSound(SOUND_PICKS[job].src); soundEffects[name].volume = CONFIG.SFX_VOLUME; }
+  }
+
   // Grabbing / letting go of the cart handle (F)
   if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);
 
@@ -202,7 +207,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   // the ones a run hears early and often: decoded now, so their first play isn't late
   preloadSounds(['footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'sfx/cart_drop.wav', 'sfx/cart_roll.wav',
     'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav',
-    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src), 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
+    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle', 'steps-store', 'steps-lot'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src), 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
 
   return {
     music,

@@ -34,5 +34,115 @@ export const SOUND_PICKS = {
  "cart-handle": {
   "src": "sfx/cart_handle.mp3",
   "take": "handle/el-grab"
+ },
+ "steps-store": {
+  "src": "sfx/steps_store.wav",
+  "take": "steps-store/es-footsteps-human-tiles-sneakers-walking-speed",
+  "lowpassHz": 300,
+  "steps": [
+   [
+    0,
+    0.4
+   ],
+   [
+    0.48,
+    0.88
+   ],
+   [
+    0.96,
+    1.36
+   ],
+   [
+    1.44,
+    1.84
+   ],
+   [
+    1.92,
+    2.32
+   ],
+   [
+    2.4,
+    2.8
+   ],
+   [
+    2.88,
+    3.28
+   ],
+   [
+    3.36,
+    3.76
+   ],
+   [
+    3.84,
+    4.24
+   ],
+   [
+    4.32,
+    4.72
+   ],
+   [
+    4.8,
+    5.2
+   ],
+   [
+    5.28,
+    5.68
+   ]
+  ]
+ },
+ "steps-lot": {
+  "src": "sfx/steps_lot.wav",
+  "take": "steps-lot/es-footsteps-human-shoes-asphalt-walk",
+  "lowpassHz": 300,
+  "steps": [
+   [
+    0,
+    0.4
+   ],
+   [
+    0.48,
+    0.88
+   ],
+   [
+    0.96,
+    1.36
+   ],
+   [
+    1.44,
+    1.84
+   ],
+   [
+    1.92,
+    2.32
+   ],
+   [
+    2.4,
+    2.8
+   ],
+   [
+    2.88,
+    3.28
+   ],
+   [
+    3.36,
+    3.76
+   ],
+   [
+    3.84,
+    4.24
+   ],
+   [
+    4.32,
+    4.72
+   ],
+   [
+    4.8,
+    5.2
+   ],
+   [
+    5.28,
+    5.68
+   ]
+  ]
  }
 };
