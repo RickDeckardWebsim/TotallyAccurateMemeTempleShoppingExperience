@@ -20,6 +20,8 @@ import { applyCartFinish, applyCartSkin } from './src/cart-skins.js';
 import { buildCartQuarterSlot } from './src/cart-quarter-slot.js';
 import * as CartPhys from './src/cart-physics.js';
 import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
+import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute } from './src/store-layout.js';
+import { addStoreWayfinding } from './src/store-signs.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -4407,59 +4409,6 @@ function createLayout5() {
 // Define ceiling height (slightly taller than before)
 const CEILING_HEIGHT = 5.5;
 
-// Generate structured aisle positions for shelves
-function generateAislePositions(totalShelves) {
-    const storeHalf = 30, minGap = 4.5, jitter = 1.0;
-    const colXs = [-15, -5, 5, 15];
-    const rowStartZ = 24, rowEndZ = -24, rowStep = 10; // spread shelves more vertically (front-to-back)
-    const positions = [], extras = [];
-    const dirByCol = [1, 1, -1, -1];
-    const wallXs = [-28, 28];
-
-    for (let z = rowStartZ; z >= rowEndZ; z -= rowStep) {
-        const missingSide = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null;
-        for (let c = 0; c < colXs.length; c++) {
-            const isLeftSide = c < 2;
-            if ((missingSide === 'left' && isLeftSide) || (missingSide === 'right' && !isLeftSide)) {
-                extras.push({ type: 'row-miss', z });
-                continue;
-            }
-            const x = colXs[c] + (Math.random() - 0.5) * jitter;
-            const pos = { x, z: z + (Math.random() - 0.5) * jitter, dir: dirByCol[c], rot: 0 };
-            if (positions.length < totalShelves && isFree(pos, positions, minGap)) positions.push(pos);
-        }
-        if (Math.random() < 0.4) extras.push({ type: 'endcap', z });
-    }
-    while (positions.length < totalShelves) {
-        const pick = Math.random();
-        if (pick < 0.4 && extras.length) {
-            const e = extras.pop();
-            const x = Math.random() < 0.5 ? -15 : 15;
-            const z = e.z + (Math.random() < 0.5 ? 3 : -3);
-            const pos = { x, z, dir: x < 0 ? 1 : -1, rot: 0 };
-            if (isFree(pos, positions, minGap)) positions.push(pos);
-        } else if (pick < 0.75) {
-            const x = wallXs[Math.floor(Math.random() * wallXs.length)];
-            const z = (Math.random() * 40) - 20; // slightly taller vertical range
-            const pos = { x, z, dir: x < 0 ? 1 : -1, rot: 0 };
-            if (isFree(pos, positions, minGap)) positions.push(pos);
-        } else {
-            const x = (Math.random() * 20) - 10;
-            const z = rowStartZ - (Math.random() * 14 + 4);
-            const pos = { x, z, dir: Math.random() < 0.5 ? 1 : -1, rot: 0 };
-            if (isFree(pos, positions, minGap)) positions.push(pos);
-        }
-    }
-    function isFree(p, arr, gap) { 
-        return arr.every(q => Math.hypot(p.x - q.x, p.z - q.z) >= gap) &&
-               Math.hypot(p.x - 0, p.z - 20) >= 10 &&
-               Math.hypot(p.x - 15, p.z - (-15)) >= 7.0 && // Guard checkout area
-               Math.hypot(p.x - (-22), p.z - (-24)) >= 7.0 && // Guard information desk area
-               Math.abs(p.x) < storeHalf - 2 && Math.abs(p.z) < storeHalf - 2;
-    }
-    return positions.slice(0, totalShelves);
-}
-
 function createStoreLayout() {
     if (isLonelyStoreMode) {
         if (sceneLights) {
@@ -4621,7 +4570,7 @@ function createStoreLayout() {
         ? CONFIG.SHELF_COUNT
         : Math.floor(Math.random() * 10) + 5;
 
-    const positions = generateAislePositions(targetShelfCount);
+    const positions = planStoreShelves(targetShelfCount, ACTIVE_ITEMS, plus5PercentPercent(CONFIG.SHELF_REPLACE_CHANCE ?? 4), Math.random, usingAltItems);
 
     // 7% chance per game that 1 shelf is completely empty
     let emptyShelfIndex = -1;
@@ -4632,7 +4581,7 @@ function createStoreLayout() {
         emptyShelfEvent = false;
     }
 
-    const shelfWidth = 8;
+    const shelfWidth = SHELF_WIDTH;
     const shelfHeight = 4.8;
     const shelfDepth = 1.6;
     const shelfY = shelfHeight / 2; // = 2.4 -> sits flat on floor (Y = 0)
@@ -4640,14 +4589,17 @@ function createStoreLayout() {
     positions.forEach((pos, idx) => {
         if (shelvesCreated >= targetShelfCount) return;
         const skipItemsOnThisShelf = (idx === emptyShelfIndex);
-        // RNG chance per shelf to replace shelf with a Freezer Unit
-        const isReplaced = Math.random() * 100 < plus5PercentPercent(CONFIG.SHELF_REPLACE_CHANCE ?? 4);
+        // The per-shelf replacement rolls are retained; group their fixtures in
+        // cold storage before creating bodies, doors and world-space stock.
+        const isReplaced = pos.isFreezer;
+        let unit;
         if (isReplaced) {
             replacedShelvesThisGame++;
-            createFreezerUnit(pos.x, shelfY, pos.z, shelfWidth, shelfHeight, shelfDepth, pos.dir || 1, pos.rot || 0, skipItemsOnThisShelf);
+            unit = createFreezerUnit(pos.x, shelfY, pos.z, shelfWidth, shelfHeight, shelfDepth, pos.dir, pos.rot, skipItemsOnThisShelf, pos.department, pos);
         } else {
-            createShelf(pos.x, shelfY, pos.z, shelfWidth, shelfHeight, shelfDepth, pos.dir || 1, pos.rot || 0, skipItemsOnThisShelf);
+            unit = createShelf(pos.x, shelfY, pos.z, shelfWidth, shelfHeight, shelfDepth, pos.dir, pos.rot, skipItemsOnThisShelf, pos.department, pos);
         }
+        Object.assign(unit.userData, { aisle: pos.aisle, laneX: pos.laneX });
         shelvesCreated++;
     });
 
@@ -8028,87 +7980,7 @@ function createStoreDecorations() {
 }
 
 function createAisleSigns() {
-    const aisleInfo = [
-        { x: -15, num: "AISLE 1", cat: "Produce & Bakery", color: "#1B5E20" },
-        { x: -5,  num: "AISLE 2", cat: "Dairy & Protein", color: "#0D47A1" },
-        { x: 5,   num: "AISLE 3", cat: "Cereal & Dry Goods", color: "#BF360C" },
-        { x: 15,  num: "AISLE 4", cat: "Drinks & Household", color: "#4A148C" }
-    ];
-
-    const zPositions = [-12, 12]; // Placed at both ends of the aisles
-
-    aisleInfo.forEach(info => {
-        zPositions.forEach(zPos => {
-            const signGroup = new THREE.Group();
-
-            const signW = 3.2;
-            const signH = 1.1;
-            const signD = 0.08;
-
-            // Frame / panel mesh
-            const panelMat = new THREE.MeshStandardMaterial({ color: 0x1E2228, roughness: 0.5, metalness: 0.2 });
-            const panelMesh = new THREE.Mesh(new THREE.BoxGeometry(signW, signH, signD), panelMat);
-            signGroup.add(panelMesh);
-
-            // Create double-sided banner canvas texture
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024;
-            canvas.height = 384;
-            const ctx = canvas.getContext('2d');
-
-            // Background with color accent
-            ctx.fillStyle = info.color;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Outer white & gold borders
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 14;
-            ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
-            ctx.strokeStyle = '#FFE082';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(22, 22, canvas.width - 44, canvas.height - 44);
-
-            // Aisle Number Header
-            ctx.fillStyle = '#FFFFFF';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = 'bold 80px "Arial Black", Impact, sans-serif';
-            ctx.fillText(info.num, canvas.width / 2, canvas.height * 0.38);
-
-            // Category Subtext
-            ctx.fillStyle = '#FFF8E1';
-            ctx.font = 'bold 42px Arial, sans-serif';
-            ctx.fillText(info.cat, canvas.width / 2, canvas.height * 0.74);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            const bannerMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-            const bannerGeo = new THREE.PlaneGeometry(signW - 0.1, signH - 0.1);
-
-            // Front banner
-            const frontBanner = new THREE.Mesh(bannerGeo, bannerMat);
-            frontBanner.position.set(0, 0, signD / 2 + 0.005);
-            signGroup.add(frontBanner);
-
-            // Back banner
-            const backBanner = new THREE.Mesh(bannerGeo, bannerMat);
-            backBanner.position.set(0, 0, -signD / 2 - 0.005);
-            backBanner.rotation.y = Math.PI;
-            signGroup.add(backBanner);
-
-            // Steel hanging rods from ceiling
-            const rodMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 });
-            const rodH = CEILING_HEIGHT - 3.8;
-            [-1.2, 1.2].forEach(rx => {
-                const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, rodH, 8), rodMat);
-                rod.position.set(rx, signH / 2 + rodH / 2, 0);
-                signGroup.add(rod);
-            });
-
-            signGroup.position.set(info.x, 3.8, zPos);
-            scene.add(signGroup);
-            registerCullableObject(signGroup, 4.0);
-        });
-    });
+    addStoreWayfinding(scene, shelfUnits, CEILING_HEIGHT, registerCullableObject);
 }
 
 function drawWrappedPosterText(ctx, text, x, centerY, maxWidth, fontFace, textColor, strokeColor) {
@@ -8960,10 +8832,11 @@ async function submitLeaderboardScore(speedrunPayload) {
     }
 }
 
-function createShelf(x, y, z, width, height, depth, direction = 1, rotationY = 0, skipItems = false) {
+function createShelf(x, y, z, width, height, depth, direction = 1, rotationY = 0, skipItems = false, department = 'pantry', stockPlan = null) {
     // Create a tall, majestic shelf unit with grounded plinth, canopy, and generous tier heights
     const shelfUnit = new THREE.Group();
-    shelfUnit.userData = { items: [], rotY: rotationY, direction, width, height, depth };
+    shelfUnit.userData = { items: [], rotY: rotationY, direction, width, height, depth, department,
+        tierPools: stockPlan?.tierPools || getShelfTierPools(ACTIVE_ITEMS, usingAltItems), tierStock: stockPlan?.tiers || null };
 
     const shelfMaterial = new THREE.MeshStandardMaterial({
         color: 0x8a6345,
@@ -9029,6 +8902,9 @@ function createShelf(x, y, z, width, height, depth, direction = 1, rotationY = 0
     ];
 
     const canopyBottomY = height / 2 - capHeight; // +2.28m
+    shelfUnit.userData.tierTops = tierPositionsY.map(t => t + boardThickness / 2);
+    shelfUnit.userData.tierClearance = tierPositionsY.map((t, i) =>
+        (i < 3 ? tierPositionsY[i + 1] - boardThickness / 2 : canopyBottomY) - t - boardThickness / 2);
 
     const cosR = Math.cos(rotationY);
     const sinR = Math.sin(rotationY);
@@ -9153,9 +9029,10 @@ function getSharedFreezerAssets() {
     return sharedFreezerAssets;
 }
 
-function createFreezerUnit(x, y, z, width, height, depth, direction = 1, rotationY = 0, skipItems = false) {
+function createFreezerUnit(x, y, z, width, height, depth, direction = 1, rotationY = 0, skipItems = false, department = 'cold', stockPlan = null) {
     const shelfUnit = new THREE.Group();
-    shelfUnit.userData = { items: [], rotY: rotationY, direction, width, height, depth, isFreezer: true };
+    shelfUnit.userData = { items: [], rotY: rotationY, direction, width, height, depth, department,
+        tierPools: stockPlan?.tierPools || getShelfTierPools(ACTIVE_ITEMS, usingAltItems), tierStock: stockPlan?.tiers || null, isFreezer: true };
 
     const assets = getSharedFreezerAssets();
     const bodyMaterial = assets.bodyMat;
@@ -9242,6 +9119,9 @@ function createFreezerUnit(x, y, z, width, height, depth, direction = 1, rotatio
         -height / 2 + plinthHeight + 3.58
     ];
     const canopyBottomY = height / 2 - capHeight;
+    shelfUnit.userData.tierTops = tierPositionsY.map(t => t + boardThickness / 2);
+    shelfUnit.userData.tierClearance = tierPositionsY.map((t, i) =>
+        (i < 3 ? tierPositionsY[i + 1] - boardThickness / 2 : canopyBottomY) - t - boardThickness / 2);
 
     for (let i = 0; i < tierPositionsY.length; i++) {
         const localTierY = tierPositionsY[i];
@@ -9419,7 +9299,8 @@ function createFreezerUnit(x, y, z, width, height, depth, direction = 1, rotatio
     shelfUnit.updateMatrixWorld(true);
     scene.add(shelfUnit);
 
-    // Populate normal grocery items on all tiers if not an empty shelf
+    shelfUnit.userData.doors = createdDoors;
+    // Freezers retain the same mixed, layer-specific RNG stock as other shelves.
     if (!skipItems) {
         for (let i = 0; i < tierPositionsY.length; i++) {
             const localTierY = tierPositionsY[i];
@@ -9569,57 +9450,14 @@ function placeItemsOnShelf(shelfUnit, x, y, z, width, depth, direction, rotation
         return;
     }
 
-    // Filter available items by shelf level to create themed shelves
-    let availableItems;
-
-    if (!usingAltItems) {
-        switch (shelfLevel % 4) {
-            case 0: // Produce & Baking
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Apples', 'Bananas', 'Potatoes', 'Sugar', 'Bread', 'Pasta', 'Pasta Sauce'].includes(item.name));
-                break;
-            case 1: // Dairy & Protein
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Milk', 'Eggs', 'Peanut Butter', 'Steak', 'Chicken'].includes(item.name));
-                break;
-            case 2: // Canned & Dry Goods
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Cereal', 'Canned Goods', 'Pasta', 'Pasta Sauce'].includes(item.name));
-                break;
-            case 3: // Household & Drinks
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Soda', 'Cleaning Supplies', 'Water bottles', 'Towels'].includes(item.name));
-                break;
-        }
-    } else {
-        switch (shelfLevel % 4) {
-            case 0: // Fresh / cold
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Ice Cream', 'Orange Juice', 'Lettuce', 'Grapes', 'Watermelon', 'Cheese'].includes(item.name));
-                break;
-            case 1: // Pantry
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Toilet paper', 'Cooking oil', 'Pizza', 'Dog food', 'Coffee', 'Batteries', 'Pasta Sauce'].includes(item.name));
-                break;
-            case 2: // Condiments & treats
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Ketchup', 'Mustard', 'Chocolate bars', 'Toys', 'Pasta Sauce'].includes(item.name));
-                break;
-            case 3: // Misc / clothing / flowers
-                availableItems = ACTIVE_ITEMS.filter(item =>
-                    ['Shampoo', 'Pants', 'Flowers'].includes(item.name));
-                break;
-        }
-    }
-
-    if (!availableItems || availableItems.length === 0) {
-        availableItems = ACTIVE_ITEMS;
-    }
-
-    const candidateItems = (availableItems && availableItems.length > 0) ? availableItems : ACTIVE_ITEMS;
+    // Department signs are hints. The original layer pools are authoritative,
+    // with independent uniform RNG, including on freezer replacement shelves.
+    const candidateItems = shelfUnit.userData.tierPools[shelfLevel % 4];
+    const rolledItems = shelfUnit.userData.tierStock?.[shelfLevel % 4];
+    if (!candidateItems?.length) return;
 
     // Determine how many items to place (3 to 5 per tier)
-    const itemCount = Math.min(Math.floor(Math.random() * 3) + 3, Math.floor((width - 1.2) / 1.1));
+    const itemCount = Math.min(rolledItems?.length ?? (Math.floor(Math.random() * 3) + 3), Math.floor((width - 1.2) / 1.1));
     const usableWidth = width - 1.4;
     const spacing = usableWidth / (itemCount + 1);
 
@@ -9627,8 +9465,8 @@ function placeItemsOnShelf(shelfUnit, x, y, z, width, depth, direction, rotation
     const sinR = Math.sin(rotationY);
 
     for (let i = 0; i < itemCount; i++) {
-        // Pure RNG: World shelf items populate independently based on natural shelf position
-        const itemTemplate = candidateItems[Math.floor(Math.random() * candidateItems.length)];
+        // Use the already-rolled stock unchanged after grouping the fixture.
+        const itemTemplate = rolledItems ? rolledItems[i] : candidateItems[Math.floor(Math.random() * candidateItems.length)];
         if (!itemTemplate) continue;
 
         // Create visible color
@@ -14306,7 +14144,8 @@ function updateStoreWorker(delta) {
             if (shelfUnits && shelfUnits.length > 0) {
                 const uncollected = shoppingList.filter(i => i.collected < i.quantity).map(i => i.name);
                 if (uncollected.length > 0) {
-                    chosenShelf = shelfUnits.find(u => u?.userData?.items && u.userData.items.some(it => it?.name && uncollected.includes(it.name)));
+                    chosenShelf = shelfUnits.find(u => u?.userData?.items?.some(it => uncollected.includes(it.name))) ||
+                        shelfUnits.find(u => u?.userData?.tierPools?.some(pool => pool.some(it => uncollected.includes(it.name))));
                 }
                 if (!chosenShelf) {
                     chosenShelf = shelfUnits[Math.floor(Math.random() * shelfUnits.length)];
@@ -14316,8 +14155,10 @@ function updateStoreWorker(delta) {
             if (chosenShelf) {
                 w.targetShelf = chosenShelf;
                 const dirSign = chosenShelf.userData.direction || 1;
-                const targetX = chosenShelf.position.x + (Math.random() - 0.5) * 2.0;
-                const targetZ = chosenShelf.position.z + dirSign * 1.6;
+                const rot = chosenShelf.userData.rotY || 0;
+                const along = (Math.random() - 0.5) * 2.0;
+                const targetX = chosenShelf.position.x + along * Math.cos(rot) + dirSign * 2.2 * Math.sin(rot);
+                const targetZ = chosenShelf.position.z - along * Math.sin(rot) + dirSign * 2.2 * Math.cos(rot);
                 const validTgt = navGrid ? clampToWalkable(navGrid, targetX, targetZ) : { x: targetX, z: targetZ };
                 w.targetShelfPos = validTgt;
 
@@ -14505,15 +14346,17 @@ function stepWorkerAlongPath(w, delta) {
 function restockItemOnShelf(shelfUnit) {
     if (!shelfUnit) return;
 
-    // Pick item: prioritize player's uncollected list items, or random active item
-    const uncollected = shoppingList.filter(i => i.collected < i.quantity && !outOfStockListItems.includes(i.name));
+    // Mixed restocks still respect the original shelf-layer restrictions.
+    const tierPools = shelfUnit.userData.tierPools || getShelfTierPools(ACTIVE_ITEMS, usingAltItems);
+    const pool = [...new Set(tierPools.flat())];
+    const uncollected = shoppingList.filter(i => i.collected < i.quantity && !outOfStockListItems.includes(i.name) && pool.some(it => it.name === i.name));
     let itemTemplate = null;
     if (uncollected.length > 0) {
         const pickName = uncollected[Math.floor(Math.random() * uncollected.length)].name;
         itemTemplate = ACTIVE_ITEMS.find(it => it.name === pickName);
     }
     if (!itemTemplate) {
-        itemTemplate = ACTIVE_ITEMS[Math.floor(Math.random() * ACTIVE_ITEMS.length)];
+        itemTemplate = pool[Math.floor(Math.random() * pool.length)];
     }
     if (!itemTemplate) return;
 
@@ -14525,9 +14368,11 @@ function restockItemOnShelf(shelfUnit) {
     const cosR = Math.cos(rotY);
     const sinR = Math.sin(rotY);
 
-    // Random tier (Tier 0..2)
-    const tierIdx = Math.floor(Math.random() * 3);
-    const tierY = -2.4 + 0.22 + 0.28 + tierIdx * 1.10;
+    // Random allowed tier, including top-only household/misc items.
+    const allowedTiers = tierPools.map((tier, i) => tier.some(item => item.name === itemTemplate.name) ? i : -1).filter(i => i >= 0);
+    const tierIdx = allowedTiers[Math.floor(Math.random() * allowedTiers.length)];
+    const tierY = shelfUnit.userData.tierTops?.[tierIdx] ?? (-2.4 + 0.22 + 0.28 + tierIdx * 1.10);
+    const availHeight = shelfUnit.userData.tierClearance?.[tierIdx] ?? 0.95;
     const localX = (Math.random() - 0.5) * (shelfWidth - 2.0);
     const localZ = dir * (shelfDepth * 0.16);
 
@@ -14546,12 +14391,18 @@ function restockItemOnShelf(shelfUnit) {
         itemTemplate.model,
         itemRotY,
         tierY,
-        0.95
+        availHeight
     );
 
     if (itemObj) {
         if (shelfUnit.userData && shelfUnit.userData.items) {
             shelfUnit.userData.items.push(itemObj);
+        }
+        const doors = shelfUnit.userData.doors;
+        if (doors?.length >= 2) {
+            const door = localX < 0 ? doors[0] : doors[1];
+            itemObj.freezerDoor = door;
+            door.itemsInside.push(itemObj);
         }
         storeStockCounts[itemTemplate.name] = (storeStockCounts[itemTemplate.name] || 0) + 1;
         
@@ -14817,9 +14668,10 @@ function setCustomerTarget(cust, targetMode = null) {
             cust.targetUnit = nearUnit;
             const rot = nearUnit.userData?.rotY || nearUnit.rotation?.y || 0;
             const dir = nearUnit.userData?.direction || 1;
-            const nx = -Math.sin(rot) * dir;
+            const nx = Math.sin(rot) * dir;
             const nz = Math.cos(rot) * dir;
-            const standDist = 1.6;
+            // The full-size cart remains ahead of the shopper while browsing.
+            const standDist = cust.hasCart ? 3.3 : 2.2;
             const tx = nearUnit.position.x + nx * standDist;
             const tz = nearUnit.position.z + nz * standDist;
             const pt = clampToWalkable(navGrid, tx, tz);
@@ -17789,6 +17641,7 @@ function showArrestMessage() {
 // worker's standing space) clear of shelves, construction and fixed fixtures.
 function createFreeSampleBooth() {
     const validSpot = (x, z) => {
+        if (blocksStoreRoute(x, z, 1.9)) return false;
         if (Math.hypot(x - 15, z + 15) < 7 ||
             Math.hypot(x + 22, z + 24) < 6 ||
             Math.hypot(x, z + 25) < 5 ||
@@ -17796,8 +17649,8 @@ function createFreeSampleBooth() {
         for (const shelf of shelfUnits) {
             const rot = shelf.userData?.rotY || 0;
             const dx = x - shelf.position.x, dz = z - shelf.position.z;
-            const localX = dx * Math.cos(rot) + dz * Math.sin(rot);
-            const localZ = -dx * Math.sin(rot) + dz * Math.cos(rot);
+            const localX = dx * Math.cos(rot) - dz * Math.sin(rot);
+            const localZ = dx * Math.sin(rot) + dz * Math.cos(rot);
             if (Math.abs(localX) < 6.2 && Math.abs(localZ) < 3.1) return false;
         }
         return constructionZones.every(zone =>
@@ -17957,6 +17810,7 @@ function createUnderConstructionZoneModel(x, z) {
 
     // Track for pathfinding as an obstacle
     group.userData.barrierBody = barrierBody;
+    group.radius = half;
     constructionZones.push(group);
     return group;
 }
@@ -17965,15 +17819,17 @@ function maybeCreateUnderConstructionZone() {
     const chance = Number.isFinite(CONFIG.UNDER_CONSTRUCTION_CHANCE) ? CONFIG.UNDER_CONSTRUCTION_CHANCE : 15;
     if (Math.random() * 100 >= plus5PercentPercent(chance)) return;
 
-    // Try a few random spots to avoid overlapping shelves/checkout
-    const maxAttempts = 12;
-    const storeMin = -25, storeMax = 25;
+    // Roll a side pocket, not a bottleneck across an aisle or the entrance.
+    // Keep the existing event chance and a full 7x7 barrier footprint.
+    const candidates = [-7.5, 7.5].flatMap(x => [-9, 1, 11, 21].map(z => ({ x, z })));
+    shuffleArray(candidates);
     let chosen = null;
 
     attemptLoop:
-    for (let i = 0; i < maxAttempts; i++) {
-        const x = storeMin + Math.random() * (storeMax - storeMin);
-        const z = storeMin + Math.random() * (storeMax - storeMin);
+    for (const pocket of candidates) {
+        const x = pocket.x + (Math.random() - 0.5) * 0.5;
+        const z = pocket.z + (Math.random() - 0.5) * 0.5;
+        if (blocksStoreRoute(x, z, 3.5)) continue;
 
         // Avoid checkout area
         const dxCo = x - 15;
@@ -17984,7 +17840,10 @@ function maybeCreateUnderConstructionZone() {
         for (const u of shelfUnits) {
             const dx = x - u.position.x;
             const dz = z - u.position.z;
-            if (Math.hypot(dx, dz) < 5) {
+            const rot = u.userData.rotY || 0;
+            const halfX = Math.abs(Math.cos(rot)) * u.userData.width / 2 + Math.abs(Math.sin(rot)) * u.userData.depth / 2;
+            const halfZ = Math.abs(Math.sin(rot)) * u.userData.width / 2 + Math.abs(Math.cos(rot)) * u.userData.depth / 2;
+            if (Math.abs(dx) < halfX + 4.2 && Math.abs(dz) < halfZ + 4.2) {
                 continue attemptLoop;
             }
         }

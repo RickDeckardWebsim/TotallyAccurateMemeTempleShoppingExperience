@@ -33,8 +33,8 @@ export function buildNavGrid({ shelfUnits = [], constructionZones = [], sampleBo
     const cosR = Math.abs(Math.cos(rot));
     const sinR = Math.abs(Math.sin(rot));
     // Base shelf dimension: 8.0m wide by 1.6m deep + margin
-    const rawW = 8.6;
-    const rawD = 2.2;
+    const rawW = (unit.userData?.width || 8) + 0.6;
+    const rawD = (unit.userData?.depth || 1.6) + 0.6;
     const effW = cosR * rawW + sinR * rawD;
     const effD = sinR * rawW + cosR * rawD;
     markBlocked(unit.position.x, unit.position.z, effW, effD);
