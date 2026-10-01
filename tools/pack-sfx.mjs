@@ -14,21 +14,19 @@ import { Mp3Encoder } from '@breezystack/lamejs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const RATE = 48000, KBPS = 128;
-const GAP = 0.12;   // silence between sounds (seconds), so one never bleeds into the next
+const GAP = 0.05;   // silence between sounds (seconds), so one never bleeds into the next
 const MARK = 0.05;  // where the alignment click sits (see the engine's loadPack)
 
-// The short sounds. Long ones (music, ambience, the nuke's sirens and roars) stream from their own files.
+// The sounds a normal run uses (cart, items, footsteps, doors, UI, checkout). Decoded together at page load.
+// Event sounds (nuke, side quests, phone call, jumpscare, freezer, baby, thieves...) are left out on purpose:
+// each loads and decodes its own file the first time it plays, so a run only holds the ones that happened.
+// Long sounds (music, ambience, sirens) stream from their own files.
 const PACK = [
-    'FOOT3.mp3', 'footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'tada.wav', 'squeak-duck.mp3',
-    'cartoonslip.mp3', 'beep2.mp3', 'Kerplunk.wav', 'slap.mp3', 'villager.mp3', 'STOMP2.ogg', 'crash.wav',
-    'Cash_Register_Open_01.wav', 'attentioncustomers.wav', '20200624_Cartoon Splat sound effect.wav',
+    'footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'tada.wav', 'squeak-duck.mp3',
+    'cartoonslip.mp3', 'beep2.mp3', 'Kerplunk.wav', 'slap.mp3', 'Cash_Register_Open_01.wav',
+    '20200624_Cartoon Splat sound effect.wav',
     'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav',
-    'sfx/cart_drop.wav', 'sfx/cart_roll.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav', 'sfx/text_chime.wav', 'sfx/phone_ring.wav',
-    'sfx/fnaf_jumpscare.wav', 'sfx/thermostat_ice_crack.wav', 'sfx/freezer_door_creak.wav', 'sfx/freezer_seal_pop.wav',
-    'sfx/freezer_door_slam.wav', 'sfx/shelf_replace.wav', 'sfx/yoink.wav', 'sfx/entrance_beep.wav', 'sfx/glass_break.wav',
-    'sfx/tweaker_grunt.wav', 'sfx/money_pickup.wav', 'sfx/target_pop.wav', 'sfx/eat_sample.wav', 'sfx/toilet_flush.wav',
-    'sfx/pee_stream.wav', 'sfx/car_crank.wav', 'sfx/car_start.wav', 'sfx/car_drive.wav',
-    'sfx/nuke_alert.wav', 'sfx/nuke_whistle.wav', 'sfx/nuke_shockwave.wav', 'BABYCRY.mp3.opus',
+    'sfx/cart_drop.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav', 'sfx/entrance_beep.wav',
 ];
 // the soundboard picks (src/sound-picks.js) and every item's drop
 const picks = fs.readFileSync(path.join(ROOT, 'src/sound-picks.js'), 'utf8').match(/SOUND_PICKS = (\{[\s\S]*\});/);

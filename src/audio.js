@@ -1,5 +1,5 @@
 import { CONFIG } from '../config.js';
-import { createSound, preloadSounds } from './audio-engine.js';
+import { createSound } from './audio-engine.js';
 import { SOUND_PICKS } from './sound-picks.js';
 
 // Button hover/click sounds: made with the page (not with a run), so the main menu has them too
@@ -77,8 +77,8 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.shelfCrash = createSound('crash.wav'); soundEffects.shelfCrash.volume = CONFIG.SFX_VOLUME;
   soundEffects.customerQuestion = createSound('villager.mp3'); soundEffects.customerQuestion.volume = CONFIG.SFX_VOLUME;
 
-  // Baby crying loop (in the pack, which every browser can play; on its own, .opus needs a recent Safari)
-  soundEffects.babyCry = createSound('BABYCRY.mp3.opus');
+  // Baby crying loop (a WAV of BABYCRY.mp3.opus: older Safari can't decode .opus)
+  soundEffects.babyCry = createSound('sfx/baby_cry.wav');
   soundEffects.babyCry.volume = CONFIG.SFX_VOLUME;
   soundEffects.babyCry.loop = true;
 
@@ -187,12 +187,6 @@ export function loadSounds({ musicMuted = false } = {}) {
   const sfxPowerDown = createSound('powerdown.wav', { stream: true }); sfxPowerDown.volume = CONFIG.SFX_VOLUME;
   const sfxAttentionCustomers = createSound('attentioncustomers.wav'); sfxAttentionCustomers.volume = CONFIG.SFX_VOLUME;
   const sfxSqueak = createSound('squeak-duck.mp3'); sfxSqueak.volume = CONFIG.SFX_VOLUME;
-
-  // the ones a run hears early and often: decoded now, so their first play isn't late
-  preloadSounds(['footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'sfx/cart_drop.wav', 'sfx/cart_roll.wav',
-    'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav',
-    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle', 'steps-store', 'steps-lot', 'cart-bump', 'cart-crash'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src),
-    ...Object.keys(SOUND_PICKS).filter(j => j.startsWith('drop-')).map(j => SOUND_PICKS[j].src), /* (each item's drop) */ 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
 
   return {
     music,

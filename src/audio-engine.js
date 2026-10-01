@@ -3,10 +3,11 @@
 // createSound(src) returns an object that answers the same calls the game already makes on an
 // <audio> element (play, pause, currentTime, volume, loop, muted, paused, cloneNode), so code
 // that plays sounds doesn't change. What's different underneath:
-//  - Short sounds all live in one file, sfx/pack.mp3 (tools/pack-sfx.mjs builds it; src/sfx-pack.js
-//    says where each sound is in it). It's fetched and decoded once, as the page loads; each sound
-//    plays its stretch of it. The same sound can overlap itself (cloneNode is cheap), and starting
-//    one has no network or decode delay. A sound that isn't in the pack yet loads its own file.
+//  - The short sounds a normal run uses live in one file, sfx/pack.mp3 (tools/pack-sfx.mjs builds it;
+//    src/sfx-pack.js says where each sound is in it). It's fetched and decoded once, as the page loads;
+//    each sound plays its stretch of it. The same sound can overlap itself (cloneNode is cheap), and
+//    starting one has no network or decode delay. Any other short sound (rare events, or one not packed
+//    yet) loads and decodes its own file on its first play, so memory only goes to what a run uses.
 //  - Long sounds ({stream: true}: music, drones, ambience, sirens) still stream from an <audio>
 //    element, but routed through a gain node, so they don't sit decoded in memory.
 //  - Volume is a gain node in both cases. iPhones ignore <audio>.volume entirely (every sound
@@ -114,7 +115,7 @@ class BufferSound {
         this._duration = NaN;
         this._rate = 1;
         this._want = 0;       // play() calls waiting for the decode (a pause() in between cancels them)
-        // (decoded on first play, or ahead of time by preloadSounds)
+        // (a packed sound is decoded with the pack, at page load; any other on its first play)
     }
     get duration() { return this._duration; }
     /** Playback speed (1 = as recorded; higher is faster and higher-pitched); glides on a playing voice. */
@@ -301,7 +302,5 @@ export function setListener(camera) {
 }
 let _tmpV = null;
 
-/** Decode these now, so their first play has no delay. */
-export function preloadSounds(srcs) { if (ctx) for (const s of srcs) segmentFor(s).catch(() => {}); }
 
 export const audioContext = ctx;
