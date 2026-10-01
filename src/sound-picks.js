@@ -52,5 +52,9 @@ export const SOUND_PICKS = {
  "drop-toys": {"src":"sfx/drops/toys.mp3","take":"drop-toys/el-drop-toys-plain"},
  "drop-water-bottles": {"src":"sfx/drops/water-bottles.mp3","take":"drop-water-bottles/el-drop-water-bottles"},
  "drop-watermelon": {"src":"sfx/drops/watermelon.mp3","take":"drop-watermelon/el-drop-watermelon-v2"},
- "cart-crash": {"src":"sfx/cart_crash.mp3","take":"crash/mine-crashes-1-6","lowpassHz":8635}
+ "cart-crash": {"src":"sfx/cart_crash.mp3","take":"crash/mine-crashes-1-6","lowpassHz":8635},
+ "baby-giggle-a": {"src":"sfx/baby_giggle_a.mp3","take":"baby-giggle/el-baby-giggle-a"},
+ "baby-giggle-b": {"src":"sfx/baby_giggle_b.mp3","take":"baby-giggle/el-baby-giggle-b"},
+ "baby-giggle-c": {"src":"sfx/baby_giggle_c.mp3","take":"baby-giggle/el-baby-giggle-c"},
+ "baby-giggle-d": {"src":"sfx/baby_giggle_d.mp3","take":"baby-giggle/el-baby-giggle-d"}
 };

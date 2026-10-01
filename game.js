@@ -10509,6 +10509,7 @@ function finishIntroCutscene(skipped = false) {
         cartObject.rotation.set(0, 0, 0);
     }
     cartAttached = true;
+    greetWithBaby();
 
     // Welcome chime sound
     try {
@@ -12154,6 +12155,7 @@ function startGame() {
             cartObject.rotation.set(0, 0, 0);
         }
         cartAttached = true;
+        greetWithBaby();
 
         // Lock controls safely
         if (controls && !controls.isLocked) { try { controls.lock(); } catch (_) {} }
@@ -13458,10 +13460,31 @@ function updateCartDroppingItems(delta) {
             finalizeItemInCart(anim.item);
             if (anim.babyGrabbed) {
                 displayRngNotification(`🍼 Your baby grabbed ${anim.item.name}!`, 4200);
+                playBabyGiggle();
             }
             cartDroppingItems.splice(i, 1);
         }
     }
+}
+
+// The baby in the cart giggles: a random one of the picked giggles (never the same twice running), from the cart.
+// When something it grabbed lands in the cart, and as a run starts with it there (greetWithBaby).
+let lastBabyGiggle = -1;
+function playBabyGiggle() {
+    const giggles = soundEffects?.babyGiggles;
+    if (!giggles?.length || !cartObject) return;
+    let k = Math.floor(Math.random() * giggles.length);
+    if (giggles.length > 1 && k === lastBabyGiggle) k = (k + 1) % giggles.length;
+    lastBabyGiggle = k;
+    try {
+        const g = giggles[k].cloneNode(), p = cartObject.getWorldPosition(new THREE.Vector3());
+        g.setPosition?.(p.x, 1, p.z);
+        g.volume = CONFIG.SFX_VOLUME ?? 0.7;
+        g.play().catch(() => {});
+    } catch (_) {}
+}
+function greetWithBaby() {
+    if (cartBaby) setTimeout(() => { if (gameStarted && !gameOver && cartBaby) playBabyGiggle(); }, 600);
 }
 
 // Items landing in the cart: each item's own drop sound (SOUND_PICKS 'drop-<item>'), layered on the list
