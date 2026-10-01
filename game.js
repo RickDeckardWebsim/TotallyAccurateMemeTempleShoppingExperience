@@ -8,7 +8,8 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createSound } from './src/audio-engine.js';
+import { createSound, setListener } from './src/audio-engine.js';
+import { SOUND_PICKS } from './src/sound-picks.js';
 import { createCompatibleAudio as createCompatibleAudioExt, safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
 import { addMagMartLogo3D } from './src/magmart-logo-3d.js';
@@ -625,6 +626,45 @@ function playEntranceDoorBeep() {
             soundEffects.entranceBeep.play().catch(() => {});
         } catch (_) {}
     }
+}
+
+// Sliding doors: each slide lasts as long as its sound (SOUND_PICKS) takes to reach the moment the door is
+// fully open or shut, so the panels stop on the sound's clunk. A door that turns around part way starts
+// its sound part way in, so it still arrives on time.
+let doorOpenAmount = 0; // 0 shut .. 1 open
+let doorSlide = null;   // {from, to, t0, ms}
+function setAutoDoorsOpen(open) {
+    if (!autoDoors || open === autoDoors.open) return;
+    autoDoors.open = open;
+    if (open) playEntranceDoorBeep();
+    const full = SOUND_PICKS[open ? 'door-open' : 'door-close']?.arriveAt || 0.45; // (0.45 s: about the old slide)
+    const to = open ? 1 : 0, part = Math.abs(to - doorOpenAmount);
+    doorSlide = { from: doorOpenAmount, to, t0: performance.now(), ms: full * part * 1000 };
+    const sound = soundEffects?.[open ? 'doorOpen' : 'doorClose'], other = soundEffects?.[open ? 'doorClose' : 'doorOpen'];
+    try { other?.pause(); } catch (_) {}
+    if (sound) {
+        try {
+            sound.volume = CONFIG.SFX_VOLUME ?? 0.7;
+            sound.currentTime = full * (1 - part);
+            sound.play().catch(() => {});
+        } catch (_) {}
+    }
+}
+function updateAutoDoors() {
+    if (!autoDoors) return;
+    if (doorSlide) {
+        const k = Math.min(1, (performance.now() - doorSlide.t0) / Math.max(1, doorSlide.ms));
+        doorOpenAmount = doorSlide.from + (doorSlide.to - doorSlide.from) * k * k * (3 - 2 * k);
+        if (k >= 1) doorSlide = null;
+    }
+    const slide = autoDoors.maxSlide * doorOpenAmount;
+    autoDoors.leftPane.position.x = autoDoors.closedLeftX - slide;
+    autoDoors.rightPane.position.x = autoDoors.closedRightX + slide;
+    autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
+    autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
+    // nobody walks into a door that has started opening
+    autoDoors.leftBody.collisionResponse = !autoDoors.open;
+    autoDoors.rightBody.collisionResponse = !autoDoors.open;
 }
 
 let cartRollingRequested = false;
@@ -7535,6 +7575,7 @@ function createFrontDoors(glassMat, frameMat, entranceWidth, doorOpeningH = 4.0)
         closedRightX,
         maxSlide
     };
+    doorOpenAmount = 0; doorSlide = null;
 }
 
 function createMagMartSign() {
@@ -15463,6 +15504,7 @@ const DAY_BG_COLOR = new THREE.Color(0x87CEEB);
 
 function animate() {
     animationFrameId = requestAnimationFrame(animate);
+    setListener(camera); // spatial sounds are heard from the camera
     frameCount++;
     if (CONFIG.SHOW_FPS) updateFps();
 
@@ -15522,21 +15564,8 @@ function animate() {
         }
 
         // Trigger automatic doors to slide open as player approaches
-        if (currentZ >= -34.0 && autoDoors && !autoDoors.open) {
-            autoDoors.open = true;
-            playEntranceDoorBeep();
-        }
-
-        // Update auto doors sliding
-        if (autoDoors) {
-            const slideOffset = autoDoors.open ? autoDoors.maxSlide : 0;
-            const targetLeftX = autoDoors.closedLeftX - slideOffset;
-            const targetRightX = autoDoors.closedRightX + slideOffset;
-            autoDoors.leftPane.position.x = THREE.MathUtils.lerp(autoDoors.leftPane.position.x, targetLeftX, 0.12);
-            autoDoors.rightPane.position.x = THREE.MathUtils.lerp(autoDoors.rightPane.position.x, targetRightX, 0.12);
-            autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
-            autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
-        }
+        if (currentZ >= -34.0) setAutoDoorsOpen(true);
+        updateAutoDoors();
 
         // Near the end of the walk, animate the cart rolling forward to meet player
         if (progress > 0.80 && cartObject) {
@@ -16624,30 +16653,8 @@ function animate() {
             shouldOpen = true;
         }
 
-        if (shouldOpen && !autoDoors.open) {
-            autoDoors.open = true;
-            playEntranceDoorBeep();
-        } else if (!shouldOpen && autoDoors.open) {
-            autoDoors.open = false;
-        }
-
-        const slideOffset = autoDoors.open ? autoDoors.maxSlide : 0;
-        const targetLeftX = autoDoors.closedLeftX - slideOffset;
-        const targetRightX = autoDoors.closedRightX + slideOffset;
-
-        // Smooth slide
-        const lerpFactor = 0.12;
-        autoDoors.leftPane.position.x = THREE.MathUtils.lerp(autoDoors.leftPane.position.x, targetLeftX, lerpFactor);
-        autoDoors.rightPane.position.x = THREE.MathUtils.lerp(autoDoors.rightPane.position.x, targetRightX, lerpFactor);
-
-        // Sync physics bodies to panes
-        autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
-        autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
-
-        // When open sufficiently, temporarily disable collisions
-        const openedEnough = slideOffset > 0.5 * autoDoors.maxSlide;
-        autoDoors.leftBody.collisionResponse = !openedEnough;
-        autoDoors.rightBody.collisionResponse = !openedEnough;
+        setAutoDoorsOpen(shouldOpen);
+        updateAutoDoors();
     }
 
     // Update persistent product spill interactions (spills stay on floor without despawning)

@@ -1,5 +1,6 @@
 import { CONFIG } from '../config.js';
 import { createSound, preloadSounds } from './audio-engine.js';
+import { SOUND_PICKS } from './sound-picks.js';
 
 export function createCompatibleAudio(sources) {
   const audio = new Audio();
@@ -164,6 +165,12 @@ export function loadSounds({ musicMuted = false } = {}) {
   soundEffects.entranceBeep = createSound('sfx/entrance_beep.wav');
   soundEffects.entranceBeep.volume = (CONFIG.SFX_VOLUME || 0.7) * 0.9;
 
+  // Sliding doors (picked on the soundboard; game.js times the slide to them)
+  for (const [name, job] of [['doorOpen', 'door-open'], ['doorClose', 'door-close']]) {
+    // spatial, at the doorway (x 0, z -30): heard from wherever the camera is
+    if (SOUND_PICKS[job]) soundEffects[name] = createSound(SOUND_PICKS[job].src, { spatial: { refDistance: 4, maxDistance: 80 }, position: { x: 0, y: 2, z: -30 } });
+  }
+
   // Glass shattering SFX
   soundEffects.glassBreak = createSound('sfx/glass_break.wav');
   soundEffects.glassBreak.volume = Math.min(1.0, (CONFIG.SFX_VOLUME || 0.7) * 1.25);
@@ -186,7 +193,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   // the ones a run hears early and often: decoded now, so their first play isn't late
   preloadSounds(['footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'sfx/cart_drop.wav', 'sfx/cart_roll.wav',
     'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav',
-    'sfx/entrance_beep.wav', 'beep2.mp3', 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
+    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src), 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
 
   return {
     music,

@@ -10,12 +10,17 @@
 //    element, but routed through a gain node, so they don't sit decoded in memory.
 //  - Volume is a gain node in both cases. iPhones ignore <audio>.volume entirely (every sound
 //    plays at full level there, fades and distance included); a gain node works everywhere.
+//  - Two pools: plain sounds (UI, the player's own) and spatial ones ({spatial: true}), which sit at a
+//    position in the world and are heard from the camera (setListener each frame): quieter with
+//    distance, panned left/right. Each pool has a cap on voices playing at once; when it's full the
+//    oldest voice in it fades out to make room.
 //  - Everything meets in one bus with a limiter, so a pile-up of sounds can't clip.
 // Browsers keep audio silent until the first tap or key press; unlock() runs on those.
 
 const AC = window.AudioContext || window.webkitAudioContext;
 const ctx = AC ? new AC() : null;
 let bus = null;
+const POOLS = { plain: { cap: 32, live: [] }, spatial: { cap: 24, live: [] } };
 if (ctx) {
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
@@ -23,6 +28,7 @@ if (ctx) {
     limiter.connect(ctx.destination);
     bus = ctx.createGain();
     bus.connect(limiter);
+    if (/[?&]mute\b/.test(location.search)) bus.gain.value = 0; // ?mute: silent (automated tests)
     const unlock = () => { if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) addEventListener(ev, unlock, true);
 }
@@ -40,9 +46,24 @@ function bufferFor(src) {
     return buffers.get(src);
 }
 
+function fadeOut(v) {
+    for (const p of Object.values(POOLS)) { const k = p.live.indexOf(v); if (k >= 0) p.live.splice(k, 1); }
+    v.source.onended = null;
+    try { v.gain.gain.cancelScheduledValues(ctx.currentTime); v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.005); v.source.stop(ctx.currentTime + 0.03); } catch (_) {}
+    setTimeout(() => { try { v.gain.disconnect(); v.panner?.disconnect(); } catch (_) {} }, 80);
+}
+function setPos(node, p) {
+    if (!p) return;
+    if (node.positionX) { node.positionX.value = p.x; node.positionY.value = p.y; node.positionZ.value = p.z; }
+    else node.setPosition(p.x, p.y, p.z);
+}
+
 class BufferSound {
     constructor(src, opts = {}) {
         this.src = src;
+        // spatial: true, or {refDistance, rolloff, maxDistance}; position: {x, y, z} (setPosition)
+        this.spatial = opts.spatial ? (opts.spatial === true ? {} : opts.spatial) : null;
+        this.position = opts.position || null;
         this.loop = !!opts.loop;
         this._volume = opts.volume ?? 1;
         this._muted = false;
@@ -85,31 +106,47 @@ class BufferSound {
         if (this._voice) { this._offset = this.currentTime; this._stopVoice(); }
         this.paused = true;
     }
-    cloneNode() { const c = new BufferSound(this.src, { loop: this.loop, volume: this._volume }); c.muted = this._muted; return c; }
+    cloneNode() { const c = new BufferSound(this.src, { loop: this.loop, volume: this._volume, spatial: this.spatial, position: this.position }); c.muted = this._muted; return c; }
     _start() {
         bufferFor(this.src).then(b => {
             if (this.paused || this._voice) return;
             const source = ctx.createBufferSource(), gain = ctx.createGain();
             source.buffer = b; source.loop = this.loop; this._duration = b.duration;
             gain.gain.value = this._level();
-            source.connect(gain); gain.connect(bus);
+            source.connect(gain);
+            let panner = null;
+            if (this.spatial) {
+                panner = ctx.createPanner();
+                panner.panningModel = 'equalpower'; panner.distanceModel = 'inverse';
+                panner.refDistance = this.spatial.refDistance ?? 4; panner.rolloffFactor = this.spatial.rolloff ?? 1;
+                panner.maxDistance = this.spatial.maxDistance ?? 80;
+                setPos(panner, this.position);
+                gain.connect(panner); panner.connect(bus);
+            } else gain.connect(bus);
             const offset = this._offset >= b.duration ? 0 : this._offset;
-            const voice = { source, gain, startedAt: ctx.currentTime, offset };
+            const voice = { source, gain, panner, startedAt: ctx.currentTime, offset, owner: this };
+            const pool = POOLS[this.spatial ? 'spatial' : 'plain'];
             source.onended = () => {
+                const k = pool.live.indexOf(voice); if (k >= 0) pool.live.splice(k, 1);
                 if (this._voice !== voice) return;
                 this._voice = null; this.paused = true; this._offset = b.duration; // as <audio> does at its end
-                try { gain.disconnect(); } catch (_) {}
+                try { gain.disconnect(); panner?.disconnect(); } catch (_) {}
             };
             source.start(0, offset);
             this._voice = voice;
+            // full pool: the oldest voice in it makes room
+            pool.live.push(voice);
+            while (pool.live.length > pool.cap) { const old = pool.live.shift(); old.owner._voice === old ? old.owner.pause() : fadeOut(old); }
         }, () => { this.paused = true; });
     }
     _stopVoice() {
         const v = this._voice; this._voice = null;
-        if (!v) return;
-        v.source.onended = null;
-        try { v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.005); v.source.stop(ctx.currentTime + 0.03); } catch (_) {}
-        setTimeout(() => { try { v.gain.disconnect(); } catch (_) {} }, 80);
+        if (v) fadeOut(v);
+    }
+    /** Where a spatial sound is ({x, y, z}); moves a voice that's playing too. */
+    setPosition(x, y, z) {
+        this.position = { x, y, z };
+        if (this._voice?.panner) setPos(this._voice.panner, this.position);
     }
 }
 
@@ -157,6 +194,24 @@ export function createSound(src, opts = {}) {
     if (!ctx) { const a = new Audio(src); a.loop = !!opts.loop; a.volume = opts.volume ?? 1; return a; }
     return opts.stream ? new StreamSound(src, opts) : new BufferSound(src, opts);
 }
+
+/** The ears: where the camera is and which way it faces (call once a frame). */
+const _fwd = { x: 0, y: 0, z: -1 };
+export function setListener(camera) {
+    if (!ctx || !camera) return;
+    const L = ctx.listener, p = camera.getWorldPosition ? camera.getWorldPosition(_tmpV ||= new camera.position.constructor()) : camera.position;
+    const e = camera.matrixWorld.elements; // forward = -Z column, up = Y column
+    _fwd.x = -e[8]; _fwd.y = -e[9]; _fwd.z = -e[10];
+    if (L.positionX) {
+        const t = ctx.currentTime;
+        L.positionX.setTargetAtTime(p.x, t, 0.02); L.positionY.setTargetAtTime(p.y, t, 0.02); L.positionZ.setTargetAtTime(p.z, t, 0.02);
+        L.forwardX.setTargetAtTime(_fwd.x, t, 0.02); L.forwardY.setTargetAtTime(_fwd.y, t, 0.02); L.forwardZ.setTargetAtTime(_fwd.z, t, 0.02);
+        L.upX.value = e[4]; L.upY.value = e[5]; L.upZ.value = e[6];
+    } else {
+        L.setPosition(p.x, p.y, p.z); L.setOrientation(_fwd.x, _fwd.y, _fwd.z, e[4], e[5], e[6]);
+    }
+}
+let _tmpV = null;
 
 /** Decode these now, so their first play has no delay. */
 export function preloadSounds(srcs) { if (ctx) for (const s of srcs) bufferFor(s).catch(() => {}); }
