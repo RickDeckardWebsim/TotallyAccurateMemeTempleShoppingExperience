@@ -8,7 +8,7 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createSound, setListener, loadSoundPacks, prefetchSoundFiles } from './src/audio-engine.js';
+import { createSound, setListener, loadSoundPacks, prefetchSoundFiles, setMuted } from './src/audio-engine.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
 import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
@@ -822,6 +822,16 @@ try {
         musicMuted = (savedMuted === 'true');
     }
 } catch (_) {}
+// All sound on/off: the main menu's speaker button and Settings > Sound (music alone: the mute key, M)
+let audioMuted = false;
+try { audioMuted = localStorage.getItem('audioMuted') === 'true'; } catch (_) {}
+setMuted(audioMuted);
+function setAudioMuted(muted) {
+    audioMuted = !!muted;
+    try { localStorage.setItem('audioMuted', String(audioMuted)); } catch (_) {}
+    setMuted(audioMuted);
+    try { updateMuteButtonIcon(); } catch (_) {}
+}
 // Add a reference to the loaded sky texture so we can restore it after outages
 let skyTexture = null;
 let nightSkyTexture = null;
@@ -1194,7 +1204,6 @@ function registerMusic(el) {
 }
 function applyMusicMute() {
     for (const el of musicTracks) { try { el.muted = musicMuted; } catch (_) {} }
-    try { updateMuteButtonIcon(); } catch (_) {}
 }
 function setMusicMuted(muted) {
     musicMuted = !!muted;
@@ -4040,7 +4049,7 @@ const mainMenuElement = document.getElementById('main-menu');
 // Add mute toggle button on main menu (audio symbol)
 const muteBtn = document.createElement('button');
 muteBtn.id = 'mute-toggle';
-muteBtn.setAttribute('aria-label', 'Toggle music mute');
+muteBtn.setAttribute('aria-label', 'Sound on/off');
 muteBtn.textContent = '🔊';
 document.getElementById('game-container').appendChild(muteBtn);
 
@@ -18684,13 +18693,13 @@ function showMainMenu() {
     // Update mute icon to reflect current state
     updateMuteButtonIcon();
     // Bind mute toggle
-    muteBtn.onclick = () => setMusicMuted(!musicMuted);
+    muteBtn.onclick = () => setAudioMuted(!audioMuted);
 }
 
 function updateMuteButtonIcon() {
     if (!muteBtn) return;
-    muteBtn.textContent = musicMuted ? '🔇' : '🔊';
-    muteBtn.title = musicMuted ? 'Unmute music' : 'Mute music';
+    muteBtn.textContent = audioMuted ? '🔇' : '🔊';
+    muteBtn.title = audioMuted ? 'Sound on' : 'Sound off';
 }
 
 function hideMainMenu() {
@@ -19298,6 +19307,8 @@ function performSaveSettings() {
     const mv = parseFloat(musicSlider?.value ?? CONFIG.MUSIC_VOLUME ?? 0.5);
     const sv = parseFloat(sfxSlider?.value ?? CONFIG.SFX_VOLUME ?? 0.7);
     CONFIG.MUSIC_VOLUME = mv; CONFIG.SFX_VOLUME = sv;
+    const soundOn = document.getElementById('sound-on');
+    if (soundOn) setAudioMuted(!soundOn.checked);
     if (menuMusic) menuMusic.volume = mv;
     if (music) music.volume = mv * (1 - customerScuffleMusicMix);
     if (customerScuffleMusic) customerScuffleMusic.volume = mv * customerScuffleMusicMix;
@@ -19357,6 +19368,8 @@ function populateSettingsMenu() {
     // Set current values
     if (musicSlider) musicSlider.value = CONFIG.MUSIC_VOLUME ?? 0.5;
     if (sfxSlider) sfxSlider.value = CONFIG.SFX_VOLUME ?? 0.7;
+    const soundOnCheck = document.getElementById('sound-on');
+    if (soundOnCheck) soundOnCheck.checked = !audioMuted;
     if (lightingSelect) lightingSelect.value = (CONFIG.LIGHTING_QUALITY || 'high');
     if (pbrSelect) pbrSelect.value = (CONFIG.PBR_QUALITY || 'high');
     if (qSelect) qSelect.value = (CONFIG.RENDER_QUALITY || 'medium');
