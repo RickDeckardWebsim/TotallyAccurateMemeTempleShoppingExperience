@@ -8,7 +8,9 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createCompatibleAudio as createCompatibleAudioExt, safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt } from './src/audio.js';
+import { createSound, setListener } from './src/audio-engine.js';
+import { SOUND_PICKS } from './src/sound-picks.js';
+import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
 import { addMagMartLogo3D } from './src/magmart-logo-3d.js';
 import { buildNavGrid, findPath, clampToWalkable, isWalkable, isLineWalkable } from './src/pathfinding.js';
@@ -629,8 +631,129 @@ function playEntranceDoorBeep() {
     }
 }
 
+// Sliding doors: each slide lasts as long as its sound (SOUND_PICKS) takes to reach the moment the door is
+// fully open or shut, so the panels stop on the sound's clunk. A door that turns around part way starts
+// its sound part way in, so it still arrives on time.
+let doorOpenAmount = 0; // 0 shut .. 1 open
+let doorSlide = null;   // {from, to, t0, ms}
+function setAutoDoorsOpen(open) {
+    if (!autoDoors || open === autoDoors.open) return;
+    autoDoors.open = open;
+    if (open) playEntranceDoorBeep();
+    const full = SOUND_PICKS[open ? 'door-open' : 'door-close']?.arriveAt || 0.45; // (0.45 s: about the old slide)
+    const to = open ? 1 : 0, part = Math.abs(to - doorOpenAmount);
+    doorSlide = { from: doorOpenAmount, to, t0: performance.now(), ms: full * part * 1000 };
+    const sound = soundEffects?.[open ? 'doorOpen' : 'doorClose'], other = soundEffects?.[open ? 'doorClose' : 'doorOpen'];
+    try { other?.pause(); } catch (_) {}
+    if (sound) {
+        try {
+            sound.volume = CONFIG.SFX_VOLUME ?? 0.7;
+            sound.currentTime = full * (1 - part);
+            sound.play().catch(() => {});
+        } catch (_) {}
+    }
+}
+function updateAutoDoors() {
+    if (!autoDoors) return;
+    if (doorSlide) {
+        const k = Math.min(1, (performance.now() - doorSlide.t0) / Math.max(1, doorSlide.ms));
+        doorOpenAmount = doorSlide.from + (doorSlide.to - doorSlide.from) * k * k * (3 - 2 * k);
+        if (k >= 1) doorSlide = null;
+    }
+    const slide = autoDoors.maxSlide * doorOpenAmount;
+    autoDoors.leftPane.position.x = autoDoors.closedLeftX - slide;
+    autoDoors.rightPane.position.x = autoDoors.closedRightX + slide;
+    autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
+    autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
+    // nobody walks into a door that has started opening
+    autoDoors.leftBody.collisionResponse = !autoDoors.open;
+    autoDoors.rightBody.collisionResponse = !autoDoors.open;
+}
+
 let cartRollingRequested = false;
-function updateCartRollingSound(rolling) {
+/* @tweakable Items in the cart at which it rolls with the fully loaded sound */
+const CART_ROLL_FULL_ITEMS = 12;
+/* @tweakable Cart rolling level on the smooth store floor (dB) */
+const CART_ROLL_STORE_DB = 0;
+/* @tweakable Cart rolling level on rough ground outside the store (dB; the rough-ground layer comes on top) */
+const CART_ROLL_LOT_DB = 6;
+// Cart rolling: two loops, an empty metal cart and a loaded one (SOUND_PICKS), blended by how full the
+// basket is (equal power, so the level holds through the blend). Outside the store (rough ground) the
+// blend is louder and a rough-ground loop plays on top; the doorway crossfades. While a wheel is stuck
+// (the cart_stuck event) a squeak plays on top too. Level and pitch follow
+// how fast you push; starting and stopping fade instead of cutting. Without the picked loops: the old
+// on/off loop.
+let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0, cartRollStuck = 0;
+const npcCartSounds = new Map(); // shoppers' carts: customer -> {sound, level} (updateNpcCartSound)
+function updateCartRollingSound(rolling, speed = 0) {
+    const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
+    if (!empty || !full) { legacyCartRollingSound(rolling); return; }
+    const now = performance.now(), dt = Math.min(0.1, cartRollAt ? (now - cartRollAt) / 1000 : 0);
+    cartRollAt = now;
+    const target = rolling ? Math.min(1, speed / (CONFIG.MOVE_SPEED || 5)) : 0;
+    cartRollLevel += (target - cartRollLevel) * (1 - Math.exp(-dt * (target > cartRollLevel ? 10 : 6)));
+    const rough = soundEffects.cartRollRough, squeak = soundEffects.cartStuckSqueak;
+    if (!rolling && cartRollLevel < 0.01) {
+        cartRollLevel = 0;
+        for (const loop of [empty, full, rough, squeak]) if (loop && !loop.paused) loop.pause();
+        return;
+    }
+    const cartPos = cartObject?.position || playerBody?.position;
+    const outside = cartPos && !isInsideStore(cartPos.x, cartPos.z) ? 1 : 0;
+    cartRollOutside += (outside - cartRollOutside) * (1 - Math.exp(-dt * 6)); // ~0.5 s through the doorway
+    cartRollStuck += ((cartStuckActive ? 1 : 0) - cartRollStuck) * (1 - Math.exp(-dt * 5));
+    for (const loop of [empty, full, rough, squeak]) if (loop && loop.paused) loop.play().catch(() => {});
+    const load = Math.min(1, (collectedItems?.length || 0) / CART_ROLL_FULL_ITEMS);
+    const surfaceDb = CART_ROLL_STORE_DB + (CART_ROLL_LOT_DB - CART_ROLL_STORE_DB) * cartRollOutside;
+    const push = (CONFIG.SFX_VOLUME ?? 0.7) * BOOSTED_SFX_MULTIPLIERS.cartRoll * Math.pow(cartRollLevel, 0.7);
+    const level = push * Math.pow(10, surfaceDb / 20);
+    empty.volume = Math.min(1, level * Math.cos(load * Math.PI / 2));
+    full.volume = Math.min(1, level * Math.sin(load * Math.PI / 2));
+    if (rough) rough.volume = Math.min(1, push * cartRollOutside);
+    const rate = 0.85 + 0.25 * cartRollLevel;
+    const pitched = (job) => rate * Math.pow(2, (SOUND_PICKS[job]?.semitones || 0) / 12);
+    empty.playbackRate = pitched('cart-roll-empty');
+    full.playbackRate = pitched('cart-roll-full');
+    if (rough) rough.playbackRate = pitched('cart-roll-rough');
+    if (squeak) { squeak.volume = Math.min(1, push * cartRollStuck); squeak.playbackRate = pitched('cart-stuck'); }
+}
+// One footstep: a random step (not the last one again) from the picked set for where you are (the store
+// floor or the parking lot), pitch varied a little. Without the picked sets: the old single footstep.
+let lastFootstep = -1;
+function playFootstep() {
+    const pos = playerBody?.position, inside = !pos || isInsideStore(pos.x, pos.z);
+    const job = inside ? 'steps-store' : 'steps-lot', set = SOUND_PICKS[job]?.steps, sound = soundEffects?.[inside ? 'stepsStore' : 'stepsLot'];
+    if (!set?.length || !sound?.playSlice) {
+        try { soundEffects.footstep.currentTime = 0; soundEffects.footstep.play(); } catch (_) {}
+        return;
+    }
+    let k = Math.floor(Math.random() * set.length);
+    if (k === lastFootstep && set.length > 1) k = (k + 1) % set.length;
+    lastFootstep = k;
+    sound.playSlice(set[k][0], set[k][1], { rate: 1 + (Math.random() * 2 - 1) * 0.03 });
+}
+/* @tweakable Seconds without a bump before cart bumps are back to full volume */
+const CART_BUMP_COOLDOWN = 1.5;
+/* @tweakable How much quieter each bump is than the one before it, within the cooldown */
+const CART_BUMP_FALLOFF = 0.75;
+/* @tweakable Loudness of the crash when a flung cart lands (the picked take is quiet next to the slip sound; above 1 boosts) */
+const CART_CRASH_BOOST = 2.5;
+// Bumping again and again (grinding along a shelf) gets quieter each time: 100%, 75%, 56%... until the cart
+// has gone CART_BUMP_COOLDOWN seconds without a bump.
+let cartBumpRun = 0, lastCartBumpAt = 0;
+function cartBumpFalloff() {
+    const now = performance.now();
+    cartBumpRun = now - lastCartBumpAt < CART_BUMP_COOLDOWN * 1000 ? cartBumpRun + 1 : 0;
+    lastCartBumpAt = now;
+    return Math.pow(CART_BUMP_FALLOFF, cartBumpRun);
+}
+// Grabbing or letting go of the cart handle: the picked handle sound (fallback: the old one, if any).
+function playCartHandleSound(fallback) {
+    const sound = soundEffects?.cartHandle || fallback;
+    if (!sound) return;
+    try { sound.currentTime = 0; sound.play().catch(() => {}); } catch (_) {}
+}
+function legacyCartRollingSound(rolling) {
     const audio = soundEffects?.cartRoll;
     if (!audio) return;
     if (rolling === cartRollingRequested) return;
@@ -887,7 +1010,8 @@ function removePhoneKeyListener() {
 }
 
 function stopAllAudio() {
-    cartRollingRequested = false;
+    sweepNpcCartSounds(true);
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     customerScuffleMusicMix = 0;
     if (customerScuffleMusic) {
         customerScuffleMusic.pause();
@@ -1049,16 +1173,14 @@ function pauseOtherMusic(keep) {
 }
 function retireMusic(el) {
     if (!el) return;
-    try { el.pause(); el.removeAttribute('src'); el.load(); } catch (_) {}
+    try { el.release(); } catch (_) {}
     musicTracks.delete(el);
 }
 
 // NEW: Initialize menu music once
 function initMenuMusicSingleton() {
     if (!menuMusic) {
-        menuMusic = new Audio('Shopping Spree Serenade.mp3');
-        menuMusic.loop = true;
-        menuMusic.volume = CONFIG.MUSIC_VOLUME;
+        menuMusic = createSound('Shopping Spree Serenade.mp3', { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
         registerMusic(menuMusic);
     } else {
         // keep existing instance; only update volume/mute to current config
@@ -1084,30 +1206,6 @@ function updateFps() {
         fpsFrames = 0;
         fpsLastTime = now;
     }
-}
-
-// Utility: create an Audio element from the first source the browser can play
-function createCompatibleAudio(sources) {
-    const audio = new Audio();
-    const test = new Audio();
-    const pickSrc = (src) => {
-        const ext = src.split('.').pop().toLowerCase();
-        let mime = '';
-        if (ext === 'mp3') mime = 'audio/mpeg';
-        else if (ext === 'wav') mime = 'audio/wav';
-        else if (ext === 'ogg') mime = 'audio/ogg';
-        else if (ext === 'opus') mime = 'audio/ogg; codecs=opus'; // best cross-browser chance
-        const canPlay = test.canPlayType(mime);
-        return canPlay && canPlay !== '';
-    };
-    for (const src of sources) {
-        if (pickSrc(src)) {
-            audio.src = src;
-            return audio;
-        }
-    }
-    // No supported sources; return an empty audio to avoid crashing on play()
-    return audio;
 }
 
 // Utility: safely play audio without unhandled promise rejections
@@ -3918,7 +4016,7 @@ muteBtn.textContent = '🔊';
 document.getElementById('game-container').appendChild(muteBtn);
 
 function playUIButtonSound(name) {
-    const source = soundEffects?.[name];
+    const source = UI_SOUNDS[name]; // (made with the page, so the main menu has them too)
     const sfxVolume = Math.max(0, Math.min(1, CONFIG.SFX_VOLUME ?? 0.7));
     if (!source || sfxVolume === 0) return;
     try {
@@ -4174,10 +4272,10 @@ function loadSounds() {
     if (music && music !== newMusic) retireMusic(music);
     music = registerMusic(newMusic);
     soundEffects = newSfx;
-    soundEffects.tweakerGrunt = new Audio('./sfx/tweaker_grunt.wav');
-    soundEffects.moneyPickup = new Audio('./sfx/money_pickup.wav');
+    soundEffects.tweakerGrunt = createSound('sfx/tweaker_grunt.wav');
+    soundEffects.moneyPickup = createSound('sfx/money_pickup.wav');
     Object.keys(BOOSTED_SFX_MULTIPLIERS).forEach(name => setBoostedSfxVolume(name));
-    cartRollingRequested = false;
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     sfxKey = singles.sfxKey;
     sfxTada = singles.sfxTada;
     sfxPowerDown = singles.sfxPowerDown;
@@ -4186,10 +4284,8 @@ function loadSounds() {
 
     // Initialize Mr. Resetti fail music (counted as music)
     try {
-        mrResettiMusic = new Audio('Mr. Resetti - Animal Crossing Wild World Soundtrack [TubeRipper.com].mp3');
+        mrResettiMusic = createSound('Mr. Resetti - Animal Crossing Wild World Soundtrack [TubeRipper.com].mp3', { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
         registerMusic(mrResettiMusic);
-        mrResettiMusic.loop = true;
-        mrResettiMusic.volume = CONFIG.MUSIC_VOLUME;
         mrResettiMusic.muted = musicMuted;
     } catch (_) {}
 }
@@ -4816,9 +4912,8 @@ function startCustomerScuffle(first, second) {
     }
     displayMessage("💢 Two customers are fighting and throwing groceries!", 4200, true);
     if (!customerScuffleMusic) {
-        customerScuffleMusic = new Audio('20260418_Mii Fight - Tomodachi Life： Living the Dream [OST].wav');
+        customerScuffleMusic = createSound('20260418_Mii Fight - Tomodachi Life： Living the Dream [OST].mp3', { stream: true, loop: true });
         registerMusic(customerScuffleMusic);
-        customerScuffleMusic.loop = true;
     }
     customerScuffleMusic.volume = 0;
     customerScuffleMusic.muted = musicMuted;
@@ -5402,11 +5497,42 @@ function createNpcCartForCustomer(cust) {
     return { group, body, slots, items: [], wobblePhase: Math.random()*Math.PI*2 };
 }
 
+// Shoppers' carts roll audibly: each cart has its own copy of the picked store-floor roll (SOUND_PICKS
+// 'npc-cart-roll'), placed at the cart (spatial: heard from the camera, panned, quieter with distance),
+// louder and a little higher the faster it moves, silent when it stops. sweepNpcCartSounds (each frame)
+// stops the sound of a shopper who has left, lost the cart, or a game that has ended.
+function updateNpcCartSound(cust, speed, delta) {
+    const pick = SOUND_PICKS['npc-cart-roll'];
+    if (!pick) return;
+    let entry = npcCartSounds.get(cust);
+    if (!entry) {
+        entry = { sound: createSound(pick.src, { loop: true, volume: 0, spatial: { refDistance: 3, maxDistance: 45 } }), level: 0 };
+        npcCartSounds.set(cust, entry);
+    }
+    const target = Math.min(1, speed / Math.max(0.5, cust.walkSpeed || 2));
+    entry.level += (target - entry.level) * (1 - Math.exp(-(delta || 0.016) * 8));
+    const { sound } = entry, g = cust.cart.group.position;
+    if (entry.level < 0.02) { if (!sound.paused) sound.pause(); return; }
+    sound.setPosition(g.x, 0.6, g.z);
+    sound.volume = (CONFIG.SFX_VOLUME ?? 0.7) * Math.pow(entry.level, 0.7);
+    sound.playbackRate = 0.85 + 0.25 * entry.level;
+    if (sound.paused) sound.play().catch(() => {});
+}
+function sweepNpcCartSounds(all = false) {
+    for (const [cust, entry] of npcCartSounds) {
+        if (all || gameOver || !cust.hasCart || !customers.includes(cust)) {
+            try { entry.sound.pause(); } catch (_) {}
+            npcCartSounds.delete(cust);
+        }
+    }
+}
+
 // The shopper already smooths its heading; keep the handle rigidly in front of them.
 function updateNpcCartFollow(cust, delta) {
     if (!cust.hasCart || !cust.cart || !cust.body) return;
     const velx = cust.body.velocity.x, velz = cust.body.velocity.z;
     const speed = Math.hypot(velx, velz);
+    updateNpcCartSound(cust, speed, delta);
     
     const facing = npcCartHeading(cust);
     const offset = NPC_CART_FOLLOW_OFFSET; // keep the scaled handle 0.33m in front
@@ -7532,6 +7658,7 @@ function createFrontDoors(glassMat, frameMat, entranceWidth, doorOpeningH = 4.0)
         closedRightX,
         maxSlide
     };
+    doorOpenAmount = 0; doorSlide = null;
 }
 
 function createMagMartSign() {
@@ -10497,10 +10624,13 @@ CartPhys.initCartPhysics({
         if (fromScuffle) displayMessage(`💥 A flying ${item.name} landed in your cart!`, 2400, true);
     },
     onBump: (strength) => {
+        // the picked bump (SOUND_PICKS 'cart-bump') if there is one, else cart_drop.wav; harder hits are louder,
+        // and each bump soon after another is quieter (see cartBumpFalloff)
         try {
-            if (!soundEffects.cartAdd) return;
-            const bump = soundEffects.cartAdd.cloneNode();
-            bump.volume = Math.min(1, soundEffects.cartAdd.volume * (0.35 + 0.65 * strength));
+            const base = soundEffects.cartBump || soundEffects.cartAdd;
+            if (!base) return;
+            const bump = base.cloneNode();
+            bump.volume = Math.min(1, base.volume * (0.35 + 0.65 * strength) * cartBumpFalloff());
             bump.play().catch(() => {});
         } catch (_) {}
     },
@@ -11096,12 +11226,12 @@ function setupEvents() {
         if (event.code === kb.cart && !SQ.isMovementLocked()) {
             if (cartAttached) {
                 cartAttached = false;
-                try { if (soundEffects.cartDrop) { soundEffects.cartDrop.currentTime = 0; soundEffects.cartDrop.play(); } } catch(_) {}
+                playCartHandleSound(soundEffects.cartDrop);
                 displayMessage(`Detached from cart. You can now grab items off shelves! (Press ${formatKeyName(kb.cart)} to push cart)`, 2200);
             } else {
                 if (canInteractWithCart()) {
                     cartAttached = true;
-                    try { if (soundEffects.grab) { soundEffects.grab.currentTime = 0; soundEffects.grab.play(); } } catch(_) {}
+                    playCartHandleSound(soundEffects.grab);
                     displayMessage("Attached to shopping cart!", 1500);
                 } else {
                     displayMessage(`Get closer to your shopping cart to attach! (Press ${formatKeyName(kb.cart)})`, 1800);
@@ -11247,8 +11377,7 @@ function setupEvents() {
             !soundEffects.footstep.playing &&
             playerBody.position.y < 1.1) {
 
-            soundEffects.footstep.currentTime = 0;
-            soundEffects.footstep.play();
+            playFootstep();
             soundEffects.footstep.playing = true;
 
             footstepCount++;
@@ -13318,8 +13447,21 @@ function updateCartDroppingItems(delta) {
     }
 }
 
+// Items landing in the cart: each item's own drop sound (SOUND_PICKS 'drop-<item>'), layered on the list
+// chime (or run.wav) that already plays. A copy per drop, so items landing close together overlap.
+const itemDropSounds = new Map();
+function playItemDropSound(item) {
+    const slug = (item?.isCheckoutGum || item?.name === 'Gum') ? 'chewing-gum' : String(item?.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const pick = SOUND_PICKS['drop-' + slug];
+    if (!pick) return;
+    let sound = itemDropSounds.get(slug);
+    if (!sound) { sound = createSound(pick.src); itemDropSounds.set(slug, sound); }
+    try { const s = sound.cloneNode(); s.volume = CONFIG.SFX_VOLUME ?? 0.7; s.play().catch(() => {}); } catch (_) {}
+}
+
 function finalizeItemInCart(item) {
     item.inCart = true;
+    playItemDropSound(item);
     item.isStatic = true;
     if (!collectedItems.includes(item)) {
         collectedItems.push(item);
@@ -15387,6 +15529,8 @@ const DAY_BG_COLOR = new THREE.Color(0x87CEEB);
 
 function animate() {
     animationFrameId = requestAnimationFrame(animate);
+    setListener(camera); // spatial sounds are heard from the camera
+    if (npcCartSounds.size) sweepNpcCartSounds();
     frameCount++;
     if (CONFIG.SHOW_FPS) updateFps();
 
@@ -15447,21 +15591,8 @@ function animate() {
         }
 
         // Trigger automatic doors to slide open as player approaches
-        if (currentZ >= -34.0 && autoDoors && !autoDoors.open) {
-            autoDoors.open = true;
-            playEntranceDoorBeep();
-        }
-
-        // Update auto doors sliding
-        if (autoDoors) {
-            const slideOffset = autoDoors.open ? autoDoors.maxSlide : 0;
-            const targetLeftX = autoDoors.closedLeftX - slideOffset;
-            const targetRightX = autoDoors.closedRightX + slideOffset;
-            autoDoors.leftPane.position.x = THREE.MathUtils.lerp(autoDoors.leftPane.position.x, targetLeftX, 0.12);
-            autoDoors.rightPane.position.x = THREE.MathUtils.lerp(autoDoors.rightPane.position.x, targetRightX, 0.12);
-            autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
-            autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
-        }
+        if (currentZ >= -34.0) setAutoDoorsOpen(true);
+        updateAutoDoors();
 
         // Near the end of the walk, animate the cart rolling forward to meet player
         if (progress > 0.80 && cartObject) {
@@ -15598,7 +15729,7 @@ function animate() {
     // Compute walking head bob and sway (very nuanced, subtle and gentle)
     const playerHVelocity = playerBody ? Math.hypot(playerBody.velocity.x, playerBody.velocity.z) : 0;
     const isWalking = controls.isLocked && !isCheckout && !gamePaused && gameStarted && (playerHVelocity > 0.15);
-    updateCartRollingSound(isWalking && !gameOver && cartAttached && !cartFlingActive);
+    updateCartRollingSound(isWalking && !gameOver && cartAttached && !cartFlingActive, playerHVelocity);
     if (soundEffects?.entranceBeep && !soundEffects.entranceBeep.paused) {
         updateEntranceDoorBeepVolume();
     }
@@ -15815,6 +15946,11 @@ function animate() {
         if (cartObject.position.y <= cartFlingStartY) {
             cartObject.position.y = cartFlingStartY; cartFlingActive = false;
             CartPhys.wakeCartItems(1.2);
+            // the cart crashing back down (the picked crash, where the cart lands)
+            const crash = soundEffects?.cartCrash;
+            if (crash) {
+                try { const c = crash.cloneNode(); c.setPosition?.(cartObject.position.x, 0.5, cartObject.position.z); c.volume = (CONFIG.SFX_VOLUME ?? 0.7) * CART_CRASH_BOOST; c.play().catch(() => {}); } catch (_) {}
+            }
         }
     }
 
@@ -16550,30 +16686,8 @@ function animate() {
             shouldOpen = true;
         }
 
-        if (shouldOpen && !autoDoors.open) {
-            autoDoors.open = true;
-            playEntranceDoorBeep();
-        } else if (!shouldOpen && autoDoors.open) {
-            autoDoors.open = false;
-        }
-
-        const slideOffset = autoDoors.open ? autoDoors.maxSlide : 0;
-        const targetLeftX = autoDoors.closedLeftX - slideOffset;
-        const targetRightX = autoDoors.closedRightX + slideOffset;
-
-        // Smooth slide
-        const lerpFactor = 0.12;
-        autoDoors.leftPane.position.x = THREE.MathUtils.lerp(autoDoors.leftPane.position.x, targetLeftX, lerpFactor);
-        autoDoors.rightPane.position.x = THREE.MathUtils.lerp(autoDoors.rightPane.position.x, targetRightX, lerpFactor);
-
-        // Sync physics bodies to panes
-        autoDoors.leftBody.position.x = autoDoors.leftPane.position.x;
-        autoDoors.rightBody.position.x = autoDoors.rightPane.position.x;
-
-        // When open sufficiently, temporarily disable collisions
-        const openedEnough = slideOffset > 0.5 * autoDoors.maxSlide;
-        autoDoors.leftBody.collisionResponse = !openedEnough;
-        autoDoors.rightBody.collisionResponse = !openedEnough;
+        setAutoDoorsOpen(shouldOpen);
+        updateAutoDoors();
     }
 
     // Update persistent product spill interactions (spills stay on floor without despawning)
@@ -19393,6 +19507,7 @@ function init() {
     fpsOverlay.style.display = CONFIG.SHOW_FPS ? 'block' : 'none';
 
     window.triggerWifeCallEvent = triggerWifeCallEvent;
+    window.triggerTrip = triggerTrip;
     window.triggerEarthquakeEvent = triggerEarthquakeEvent;
     window.triggerThermostatMalfunction = triggerThermostatMalfunction;
     window.activateCurrentPowerup = activateCurrentPowerup;
@@ -20347,7 +20462,7 @@ function nukeFreezeRun() {
     cancelScheduledEvents(true);
     if (addItemIntervalId) { clearInterval(addItemIntervalId); addItemIntervalId = null; }
     if (removeItemIntervalId) { clearInterval(removeItemIntervalId); removeItemIntervalId = null; }
-    cartRollingRequested = false;
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     try { updateCartRollingSound(false); } catch (_) {}
     if (soundEffects?.entranceBeep) { try { soundEffects.entranceBeep.pause(); } catch (_) {} }
 }

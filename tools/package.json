@@ -1,0 +1,9 @@
+{
+  "name": "shopping-tools",
+  "private": true,
+  "type": "module",
+  "description": "Build tools for the game (not loaded by the game itself).",
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7"
+  }
+}

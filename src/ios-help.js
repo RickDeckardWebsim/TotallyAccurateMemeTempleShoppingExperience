@@ -3,13 +3,14 @@
 // This sheet explains the few things a player can do and starts the game from
 // a fresh tap.
 
+import { audioContext } from './audio-engine.js';
+
 let sheet = null;
 
 function unlockAudio() {
     try {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (Ctx) {
-            const ctx = window.__ssUnlockCtx || (window.__ssUnlockCtx = new Ctx());
+        const ctx = audioContext; // the game's own (src/audio-engine.js): unlocking it unlocks every sound
+        if (ctx) {
             const buf = ctx.createBuffer(1, 1, 22050);
             const src = ctx.createBufferSource();
             src.buffer = buf;

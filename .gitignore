@@ -1,2 +1,5 @@
 # websim-cli per-machine upload state
 .websim-manifest.json
+
+# tools/ dependencies (npm i in tools/)
+node_modules/

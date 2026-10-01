@@ -1,26 +1,26 @@
+// The game's sounds. How to work with them (src/audio-engine.js does the playing):
+//  - Add a sound: put the file in sfx/ and add it below with createSound('sfx/name.wav'). It behaves like an
+//    <audio> element: play(), pause(), volume, loop, currentTime, cloneNode(). Keep it in soundEffects and set
+//    its volume from CONFIG.SFX_VOLUME, like the others, so the settings slider reaches it.
+//  - The same sound overlapping itself (rapid hits): play sound.cloneNode() instead of the sound.
+//  - Long files (music, ambience; over ~15 s): createSound(src, { stream: true, loop: true }), so an MP3 streams
+//    instead of sitting in memory. Music also goes through registerMusic() in game.js (the mute button).
+//  - A sound somewhere in the world: createSound(src, { spatial: true, position: { x, y, z } }): quieter with
+//    distance and panned left/right from the camera. setPosition(x, y, z) moves it.
+//  - volume above 1 boosts it (the engine's limiter keeps it from clipping).
+//  - WAVs aren't downloaded as they are: tools/pack-sfx.mjs makes small MP3s from them (sfx/pack.mp3 for what every
+//    run uses, sfx/packed/ for the rest; list: src/sfx-pack.js), and the code keeps using the WAV's name. A new
+//    sound works straight away (its own file loads); run the tool to shrink it. If you replace the audio of a file
+//    listed there, run the tool again (cd tools && npm i && node pack-sfx.mjs) or delete its line in src/sfx-pack.js.
+//  - Sounds picked on the soundboard (cart, doors, footsteps, item drops): src/sound-picks.js.
 import { CONFIG } from '../config.js';
+import { createSound } from './audio-engine.js';
+import { SOUND_PICKS } from './sound-picks.js';
 
-export function createCompatibleAudio(sources) {
-  const audio = new Audio();
-  const test = new Audio();
-  const pickSrc = (src) => {
-    const ext = src.split('.').pop().toLowerCase();
-    let mime = '';
-    if (ext === 'mp3') mime = 'audio/mpeg';
-    else if (ext === 'wav') mime = 'audio/wav';
-    else if (ext === 'ogg') mime = 'audio/ogg';
-    else if (ext === 'opus') mime = 'audio/ogg; codecs=opus';
-    const canPlay = test.canPlayType(mime);
-    return canPlay && canPlay !== '';
-  };
-  for (const src of sources) {
-    if (pickSrc(src)) {
-      audio.src = src;
-      return audio;
-    }
-  }
-  return audio;
-}
+// Button hover/click sounds: made with the page (not with a run), so the main menu has them too
+export const UI_SOUNDS = { uiHover: createSound('sfx/ui_hover.wav'), uiClick: createSound('sfx/ui_click.wav') };
+UI_SOUNDS.uiHover.volume = CONFIG.SFX_VOLUME * 0.55;
+UI_SOUNDS.uiClick.volume = CONFIG.SFX_VOLUME * 0.8;
 
 export async function safePlay(audio) {
   if (!audio || !audio.src) return;
@@ -54,133 +54,154 @@ export function loadSounds({ musicMuted = false } = {}) {
   // Pick background music
   const musicFiles = [
     'Shopping.mp3',
-    'Cruisin Elavator.wav',
+    'Cruisin Elavator.mp3',
     'Convenience Store.mp3',
     '28. eShop - Menu (Track 3).mp3',
     "Animal Crossing City Folk OST '11 AM (Normal)' (1).mp3"
   ];
   const chosenMusicFile = musicFiles[Math.floor(Math.random() * musicFiles.length)];
-  const music = new Audio(chosenMusicFile);
-  music.loop = true;
-  music.volume = CONFIG.MUSIC_VOLUME;
+  const music = createSound(chosenMusicFile, { stream: true, loop: true, volume: CONFIG.MUSIC_VOLUME });
   music.muted = musicMuted;
 
   // Footstep (replacement already wired to FOOT3.mp3)
-  soundEffects.footstep = new Audio('FOOT3.mp3');
+  soundEffects.footstep = createSound('FOOT3.mp3');
   soundEffects.footstep.volume = CONFIG.SFX_VOLUME * 0.5;
   soundEffects.footstep.playing = false;
 
   const audioFile = 'footsteps-on-wood-floor-14735.wav';
-  soundEffects.grab = new Audio(audioFile); soundEffects.grab.volume = CONFIG.SFX_VOLUME;
+  soundEffects.grab = createSound(audioFile); soundEffects.grab.volume = CONFIG.SFX_VOLUME;
   // Use the new whu6.wav for accidental drop sound
-  soundEffects.drop = new Audio('whu6.wav'); soundEffects.drop.volume = CONFIG.SFX_VOLUME;
-  soundEffects.checkout = new Audio(audioFile); soundEffects.checkout.volume = CONFIG.SFX_VOLUME;
-  soundEffects.cartAdd = new Audio('sfx/cart_drop.wav'); soundEffects.cartAdd.volume = CONFIG.SFX_VOLUME;
-  soundEffects.cartRoll = new Audio('sfx/cart_roll.wav');
+  soundEffects.drop = createSound('whu6.wav'); soundEffects.drop.volume = CONFIG.SFX_VOLUME;
+  soundEffects.checkout = createSound(audioFile); soundEffects.checkout.volume = CONFIG.SFX_VOLUME;
+  soundEffects.cartAdd = createSound('sfx/cart_drop.wav'); soundEffects.cartAdd.volume = CONFIG.SFX_VOLUME;
+  soundEffects.cartRoll = createSound('sfx/cart_roll.wav');
   soundEffects.cartRoll.loop = true;
   soundEffects.cartRoll.volume = Math.min(1, CONFIG.SFX_VOLUME * 1.4);
-  soundEffects.powerOutage = new Audio(audioFile); soundEffects.powerOutage.volume = CONFIG.SFX_VOLUME;
-  soundEffects.storeClosing = new Audio(audioFile); soundEffects.storeClosing.volume = CONFIG.SFX_VOLUME;
+  soundEffects.powerOutage = createSound(audioFile); soundEffects.powerOutage.volume = CONFIG.SFX_VOLUME;
+  soundEffects.storeClosing = createSound(audioFile); soundEffects.storeClosing.volume = CONFIG.SFX_VOLUME;
 
-  soundEffects.trip = new Audio('cartoonslip.mp3'); soundEffects.trip.volume = CONFIG.SFX_VOLUME;
-  soundEffects.wrongItem = new Audio('run.wav'); soundEffects.wrongItem.volume = CONFIG.SFX_VOLUME;
+  soundEffects.trip = createSound('cartoonslip.mp3'); soundEffects.trip.volume = CONFIG.SFX_VOLUME;
+  soundEffects.wrongItem = createSound('run.wav'); soundEffects.wrongItem.volume = CONFIG.SFX_VOLUME;
 
-  soundEffects.cashRegister = new Audio('Cash_Register_Open_01.wav'); soundEffects.cashRegister.volume = CONFIG.SFX_VOLUME;
-  soundEffects.policeSiren = new Audio('20120126_Police Siren Sound Effect.wav'); soundEffects.policeSiren.volume = CONFIG.SFX_VOLUME;
-  soundEffects.productSpill = new Audio('20200624_Cartoon Splat sound effect.wav'); soundEffects.productSpill.volume = CONFIG.SFX_VOLUME;
-  soundEffects.checkoutScan = new Audio('beep2.mp3'); soundEffects.checkoutScan.volume = CONFIG.SFX_VOLUME;
-  soundEffects.itemRemoved = new Audio('Kerplunk.wav'); soundEffects.itemRemoved.volume = CONFIG.SFX_VOLUME;
-  soundEffects.itemAddedToList = new Audio('ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav'); soundEffects.itemAddedToList.volume = CONFIG.SFX_VOLUME;
-  soundEffects.shelfCrash = new Audio('crash.wav'); soundEffects.shelfCrash.volume = CONFIG.SFX_VOLUME;
-  soundEffects.customerQuestion = new Audio('villager.mp3'); soundEffects.customerQuestion.volume = CONFIG.SFX_VOLUME;
+  soundEffects.cashRegister = createSound('Cash_Register_Open_01.wav'); soundEffects.cashRegister.volume = CONFIG.SFX_VOLUME;
+  soundEffects.policeSiren = createSound('20120126_Police Siren Sound Effect.mp3', { stream: true }); soundEffects.policeSiren.volume = CONFIG.SFX_VOLUME;
+  soundEffects.productSpill = createSound('20200624_Cartoon Splat sound effect.wav'); soundEffects.productSpill.volume = CONFIG.SFX_VOLUME;
+  soundEffects.checkoutScan = createSound('beep2.mp3'); soundEffects.checkoutScan.volume = CONFIG.SFX_VOLUME;
+  soundEffects.itemRemoved = createSound('Kerplunk.wav'); soundEffects.itemRemoved.volume = CONFIG.SFX_VOLUME;
+  soundEffects.itemAddedToList = createSound('ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav'); soundEffects.itemAddedToList.volume = CONFIG.SFX_VOLUME;
+  soundEffects.shelfCrash = createSound('crash.wav'); soundEffects.shelfCrash.volume = CONFIG.SFX_VOLUME;
+  soundEffects.customerQuestion = createSound('villager.mp3'); soundEffects.customerQuestion.volume = CONFIG.SFX_VOLUME;
 
-  // Baby crying loop (with compatibility)
-  soundEffects.babyCry = createCompatibleAudio(['BABYCRY.mp3.opus', 'beep2.mp3']);
+  // Baby crying loop (a WAV of BABYCRY.mp3.opus: older Safari can't decode .opus)
+  soundEffects.babyCry = createSound('sfx/baby_cry.wav');
   soundEffects.babyCry.volume = CONFIG.SFX_VOLUME;
   soundEffects.babyCry.loop = true;
 
   // Add a funny slap SFX (cartoony squeak)
-  soundEffects.slap = new Audio('slap.mp3'); soundEffects.slap.volume = CONFIG.SFX_VOLUME;
+  soundEffects.slap = createSound('slap.mp3'); soundEffects.slap.volume = CONFIG.SFX_VOLUME;
 
   // NEW: Manager stomp loop (starts when manager appears, stops at question)
   // Use two instances so we can overlap them for a denser, faster stomp feel.
-  soundEffects.managerStomp = new Audio('STOMP2.ogg');
+  soundEffects.managerStomp = createSound('STOMP2.ogg');
   soundEffects.managerStomp.loop = false;
   soundEffects.managerStomp.volume = 0;
-  soundEffects.managerStomp2 = new Audio('STOMP2.ogg');
+  soundEffects.managerStomp2 = createSound('STOMP2.ogg');
   soundEffects.managerStomp2.loop = false;
   soundEffects.managerStomp2.volume = 0;
 
   // FNAF styled jumpscare screech SFX
-  soundEffects.managerJumpscare = new Audio('sfx/fnaf_jumpscare.wav');
+  soundEffects.managerJumpscare = createSound('sfx/fnaf_jumpscare.wav');
   soundEffects.managerJumpscare.volume = Math.min(1.0, (CONFIG.SFX_VOLUME || 0.7) * 1.3);
 
   // Phone call from wife & text message SFX
-  soundEffects.phoneRing = new Audio('sfx/phone_ring.wav');
+  soundEffects.phoneRing = createSound('sfx/phone_ring.wav');
   soundEffects.phoneRing.volume = CONFIG.SFX_VOLUME;
   soundEffects.phoneRing.loop = true;
 
-  soundEffects.textChime = new Audio('sfx/text_chime.wav');
+  soundEffects.textChime = createSound('sfx/text_chime.wav');
   soundEffects.textChime.volume = CONFIG.SFX_VOLUME;
 
   // Soft UI sounds used by the shared button hover/click handlers.
-  soundEffects.uiHover = new Audio('sfx/ui_hover.wav');
-  soundEffects.uiHover.volume = CONFIG.SFX_VOLUME * 0.55;
-  soundEffects.uiClick = new Audio('sfx/ui_click.wav');
-  soundEffects.uiClick.volume = CONFIG.SFX_VOLUME * 0.8;
+  Object.assign(soundEffects, UI_SOUNDS);
 
   // Earthquake rumble SFX
-  soundEffects.earthquake = new Audio('sfx/earthquake.wav');
+  soundEffects.earthquake = createSound('sfx/earthquake.wav', { stream: true });
   soundEffects.earthquake.volume = Math.min(1.0, (CONFIG.SFX_VOLUME || 0.7) * 1.25);
 
-  soundEffects.thermostatFire = new Audio('sfx/thermostat_fire.wav');
+  soundEffects.thermostatFire = createSound('sfx/thermostat_fire.wav', { stream: true });
   soundEffects.thermostatFire.loop = true;
   soundEffects.thermostatFire.volume = 0;
-  soundEffects.thermostatWind = new Audio('sfx/thermostat_wind.wav');
+  soundEffects.thermostatWind = createSound('sfx/thermostat_wind.wav', { stream: true });
   soundEffects.thermostatWind.loop = true;
   soundEffects.thermostatWind.volume = 0;
-  soundEffects.thermostatIceCrack = new Audio('sfx/thermostat_ice_crack.wav');
+  soundEffects.thermostatIceCrack = createSound('sfx/thermostat_ice_crack.wav');
   soundEffects.thermostatIceCrack.volume = CONFIG.SFX_VOLUME * 0.55;
 
   // Amnesia freezer sound effects & shelf replacement
-  soundEffects.freezerDoorCreak = new Audio('sfx/freezer_door_creak.wav');
+  soundEffects.freezerDoorCreak = createSound('sfx/freezer_door_creak.wav');
   soundEffects.freezerDoorCreak.volume = (CONFIG.SFX_VOLUME || 0.7) * 0.85;
-  soundEffects.freezerSealPop = new Audio('sfx/freezer_seal_pop.wav');
+  soundEffects.freezerSealPop = createSound('sfx/freezer_seal_pop.wav');
   soundEffects.freezerSealPop.volume = CONFIG.SFX_VOLUME || 0.7;
-  soundEffects.freezerDoorSlam = new Audio('sfx/freezer_door_slam.wav');
+  soundEffects.freezerDoorSlam = createSound('sfx/freezer_door_slam.wav');
   soundEffects.freezerDoorSlam.volume = CONFIG.SFX_VOLUME || 0.7;
-  soundEffects.freezerHum = new Audio('sfx/freezer_hum.wav');
+  soundEffects.freezerHum = createSound('sfx/freezer_hum.wav', { stream: true });
   soundEffects.freezerHum.volume = (CONFIG.SFX_VOLUME || 0.7) * 0.35;
   soundEffects.freezerHum.loop = true;
-  soundEffects.shelfReplace = new Audio('sfx/shelf_replace.wav');
+  soundEffects.shelfReplace = createSound('sfx/shelf_replace.wav');
   soundEffects.shelfReplace.volume = CONFIG.SFX_VOLUME || 0.7;
 
   // Customer theft yoink SFX
-  soundEffects.yoink = new Audio('sfx/yoink.wav');
+  soundEffects.yoink = createSound('sfx/yoink.wav');
   soundEffects.yoink.volume = CONFIG.SFX_VOLUME || 0.7;
 
   // Entrance sliding door electronic beep/chime SFX
-  soundEffects.entranceBeep = new Audio('sfx/entrance_beep.wav');
+  soundEffects.entranceBeep = createSound('sfx/entrance_beep.wav');
   soundEffects.entranceBeep.volume = (CONFIG.SFX_VOLUME || 0.7) * 0.9;
 
+  // Sliding doors (picked on the soundboard; game.js times the slide to them)
+  for (const [name, job] of [['doorOpen', 'door-open'], ['doorClose', 'door-close']]) {
+    // spatial, at the doorway (x 0, z -30): heard from wherever the camera is
+    if (SOUND_PICKS[job]) soundEffects[name] = createSound(SOUND_PICKS[job].src, { spatial: { refDistance: 4, maxDistance: 80 }, position: { x: 0, y: 2, z: -30 } });
+  }
+
+  // Cart rolling: an empty cart and a loaded one, looped (game.js blends them by how full the cart is),
+  // and on top of them rough ground outside and a squeaking wheel while it's stuck
+  for (const [name, job] of [['cartRollEmpty', 'cart-roll-empty'], ['cartRollFull', 'cart-roll-full'], ['cartRollRough', 'cart-roll-rough'], ['cartStuckSqueak', 'cart-stuck']]) {
+    if (SOUND_PICKS[job]) soundEffects[name] = createSound(SOUND_PICKS[job].src, { loop: true, volume: 0 });
+  }
+
+  // Footsteps: a file of single steps each (the store floor, the parking lot); game.js plays one at a time
+  for (const [name, job] of [['stepsStore', 'steps-store'], ['stepsLot', 'steps-lot']]) {
+    if (SOUND_PICKS[job]) { soundEffects[name] = createSound(SOUND_PICKS[job].src); soundEffects[name].volume = CONFIG.SFX_VOLUME; }
+  }
+
+  // The cart bumping into shelves, walls, people (game.js onBump; louder for harder hits)
+  if (SOUND_PICKS['cart-bump']) { soundEffects.cartBump = createSound(SOUND_PICKS['cart-bump'].src); soundEffects.cartBump.volume = CONFIG.SFX_VOLUME; }
+
+  // The cart crashing back down after being flung (tripping); spatial, placed where it lands
+  if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 6, maxDistance: 60 } });
+
+  // Grabbing / letting go of the cart handle (F)
+  if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);
+
   // Glass shattering SFX
-  soundEffects.glassBreak = new Audio('sfx/glass_break.wav');
+  soundEffects.glassBreak = createSound('sfx/glass_break.wav');
   soundEffects.glassBreak.volume = Math.min(1.0, (CONFIG.SFX_VOLUME || 0.7) * 1.25);
 
   // Lonely Store ambient low drone SFX
-  soundEffects.lowDrone = new Audio('sfx/low_drone.wav');
+  soundEffects.lowDrone = createSound('sfx/low_drone.wav', { stream: true });
   soundEffects.lowDrone.loop = true;
   soundEffects.lowDrone.volume = 1.0;
-  soundEffects.stalkerWhispers = new Audio('sfx/stalker_whispers.wav');
+  soundEffects.stalkerWhispers = createSound('sfx/stalker_whispers.wav', { stream: true });
   soundEffects.stalkerWhispers.loop = true;
   soundEffects.stalkerWhispers.volume = 0;
 
   // Preloaded single-fire SFX
-  const sfxKey = new Audio('key.wav'); sfxKey.volume = CONFIG.SFX_VOLUME;
-  const sfxTada = new Audio('tada.wav'); sfxTada.volume = CONFIG.SFX_VOLUME;
-  const sfxPowerDown = new Audio('powerdown.wav'); sfxPowerDown.volume = CONFIG.SFX_VOLUME;
-  const sfxAttentionCustomers = new Audio('attentioncustomers.wav'); sfxAttentionCustomers.volume = CONFIG.SFX_VOLUME;
-  const sfxSqueak = new Audio('squeak-duck.mp3'); sfxSqueak.volume = CONFIG.SFX_VOLUME;
+  const sfxKey = createSound('key.wav'); sfxKey.volume = CONFIG.SFX_VOLUME;
+  const sfxTada = createSound('tada.wav'); sfxTada.volume = CONFIG.SFX_VOLUME;
+  const sfxPowerDown = createSound('powerdown.wav', { stream: true }); sfxPowerDown.volume = CONFIG.SFX_VOLUME;
+  const sfxAttentionCustomers = createSound('attentioncustomers.wav'); sfxAttentionCustomers.volume = CONFIG.SFX_VOLUME;
+  const sfxSqueak = createSound('squeak-duck.mp3'); sfxSqueak.volume = CONFIG.SFX_VOLUME;
 
   return {
     music,

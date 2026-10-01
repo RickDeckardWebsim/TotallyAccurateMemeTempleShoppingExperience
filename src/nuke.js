@@ -5,6 +5,7 @@
 // mountain (and the restroom) remain.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
+import { createSound } from './audio-engine.js';
 import { buildAftermath, updateAftermath, aftermathWindVolume, disposeAftermath } from './nuke-aftermath.js';
 
 // Timeline (seconds from trigger)
@@ -46,10 +47,7 @@ export function isAftermath() { return phase === 'aftermath' || phase === 'black
 export function isMovementLocked() { return phase === 'blackout' || phase === 'dead'; }
 
 function makeAudio(src, loop = false) {
-    const a = new Audio(src);
-    a.loop = loop;
-    a.preload = 'auto';
-    return a;
+    return createSound(src, { loop, stream: true }); // (the short ones are in the pack; the rest stream)
 }
 
 function play(a, vol, restart = true) {
@@ -71,33 +69,9 @@ function stopAllSounds() {
     setApproachGain(0);
 }
 
-// The approaching shockwave roar is routed through Web Audio so it can be
-// pushed well past the 1.0 volume cap of a plain <audio> element.
-let audioCtx = null;
-let approachGain = null;
-function boostApproach(a) {
-    try {
-        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        if (!a._nukeBoosted) {
-            const src = audioCtx.createMediaElementSource(a);
-            approachGain = audioCtx.createGain();
-            approachGain.gain.value = 0;
-            const comp = audioCtx.createDynamicsCompressor();
-            comp.threshold.value = -6;
-            comp.ratio.value = 4;
-            src.connect(approachGain).connect(comp).connect(audioCtx.destination);
-            a._nukeBoosted = true;
-        }
-        a.volume = 1;
-    } catch (_) { approachGain = null; }
-}
+// The approaching shockwave roar swells well past full volume (the engine's limiter keeps it from clipping).
 function setApproachGain(g) {
-    if (approachGain && audioCtx) {
-        approachGain.gain.setTargetAtTime(g, audioCtx.currentTime, 0.08);
-    } else if (sounds.approach) {
-        sounds.approach.volume = clamp01(g);
-    }
+    if (sounds.approach) sounds.approach.volume = g;
 }
 
 // ---------------------------------------------------------------- overlay
@@ -450,9 +424,7 @@ function detonate() {
     stopSound(sounds.whistle);
     play(sounds.boom, sfxVol());
     play(sounds.rumble, sfxVol() * 0.45);
-    boostApproach(sounds.approach);
-    setApproachGain(0);
-    play(sounds.approach, approachGain ? 1 : 0.1);
+    play(sounds.approach, 0);
     // Blinding flash
     setLayer('.nuke-flash', 1, 60);
     setTimeout(() => setLayer('.nuke-flash', 0, 3200), 220);
