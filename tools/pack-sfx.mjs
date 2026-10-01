@@ -30,7 +30,13 @@ const PACK = [
 ];
 // the soundboard picks (src/sound-picks.js) and every item's drop
 const picks = fs.readFileSync(path.join(ROOT, 'src/sound-picks.js'), 'utf8').match(/SOUND_PICKS = (\{[\s\S]*\});/);
-for (const v of Object.values(picks ? JSON.parse(picks[1]) : {})) if (!PACK.includes(v.src)) PACK.push(v.src);
+const PICKS = picks ? JSON.parse(picks[1]) : {};
+for (const v of Object.values(PICKS)) if (!PACK.includes(v.src)) PACK.push(v.src);
+// Sounds the game loops. MP3 smears the first and last few ms of a sound that sits next to silence, which a
+// loop would play at its seam every time round; so each loop goes in with its own tail before it and its own
+// head after it (WRAP seconds), and the encoder sees the seam as the continuous audio it is when looping.
+const LOOPED = new Set(['cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'npc-cart-roll'].map((j) => PICKS[j]?.src));
+const WRAP = 0.05;
 for (const f of fs.readdirSync(path.join(ROOT, 'sfx/drops')).sort()) if (/\.(mp3|wav|ogg)$/.test(f) && !PACK.includes('sfx/drops/' + f)) PACK.push('sfx/drops/' + f);
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch (_) { return false; } })();
@@ -58,9 +64,12 @@ silence(0.2);
 for (const rel of PACK) {
     const file = path.join(ROOT, rel);
     if (!fs.existsSync(file)) { console.warn('missing, skipped:', rel); continue; }
-    const x = decode(file);
+    const x = decode(file), w = LOOPED.has(rel) ? Math.min(x.length, Math.round(WRAP * RATE)) : 0;
+    if (w) push(x.slice(x.length - w));
     sounds[rel] = [+(at / RATE).toFixed(5), +(x.length / RATE).toFixed(5)];
-    push(x); silence(GAP);
+    push(x);
+    if (w) push(x.slice(0, w));
+    silence(GAP);
 }
 const all = new Float32Array(at); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
 
