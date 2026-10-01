@@ -19287,6 +19287,7 @@ function performSaveSettings() {
     const lightingSelect = document.getElementById('lighting-quality');
     const pbrSelect = document.getElementById('pbr-quality');
     const qSelect = document.getElementById('render-quality');
+    const aaSelect = document.getElementById('antialias');
     const scenerySelect = document.getElementById('scenery-detail');
     const fpsCheck = document.getElementById('show-fps');
     const mouseSlider = document.getElementById('mouse-sensitivity');
@@ -19311,6 +19312,8 @@ function performSaveSettings() {
     CONFIG.LIGHTING_QUALITY = lightingSelect?.value || (CONFIG.LIGHTING_QUALITY || 'high');
     CONFIG.PBR_QUALITY = pbrSelect?.value || (CONFIG.PBR_QUALITY || 'high');
     CONFIG.RENDER_QUALITY = qSelect?.value || (CONFIG.RENDER_QUALITY || 'medium');
+    const oldAntialias = CONFIG.ANTIALIAS || 'on';
+    CONFIG.ANTIALIAS = aaSelect?.value || oldAntialias;
     CONFIG.SCENERY_DETAIL = scenerySelect?.value || (CONFIG.SCENERY_DETAIL || 'high');
 
     applyRuntimeGraphicsSettings();
@@ -19335,7 +19338,8 @@ function performSaveSettings() {
 
     persistUserSettings();
     hideSettingsMenu();
-    displayMessage('Settings saved', 3500);
+    // (MSAA is fixed when a run's renderer is made: a change mid-run applies from the next one)
+    displayMessage(gameStarted && CONFIG.ANTIALIAS !== oldAntialias ? 'Settings saved (anti-aliasing applies from the next run)' : 'Settings saved', 3500);
 }
 
 function populateSettingsMenu() {
@@ -19356,6 +19360,8 @@ function populateSettingsMenu() {
     if (lightingSelect) lightingSelect.value = (CONFIG.LIGHTING_QUALITY || 'high');
     if (pbrSelect) pbrSelect.value = (CONFIG.PBR_QUALITY || 'high');
     if (qSelect) qSelect.value = (CONFIG.RENDER_QUALITY || 'medium');
+    const aaSel = document.getElementById('antialias');
+    if (aaSel) aaSel.value = (CONFIG.ANTIALIAS || 'on');
     if (scenerySelect) scenerySelect.value = (CONFIG.SCENERY_DETAIL || 'high');
     if (fpsCheck) fpsCheck.checked = !!CONFIG.SHOW_FPS;
     if (hideGuideCheck) hideGuideCheck.checked = !!CONFIG.HIDE_CONTROLS_GUIDE;
@@ -20665,7 +20671,7 @@ function stopSpillTripCheckForCustomer(cust) {
 function persistUserSettings() {
     const keys = [
         // Graphics / display / lighting / PBR
-        'RENDER_QUALITY','LIGHTING_QUALITY','PBR_QUALITY','SCENERY_DETAIL','SHOW_FPS',
+        'RENDER_QUALITY','ANTIALIAS','LIGHTING_QUALITY','PBR_QUALITY','SCENERY_DETAIL','SHOW_FPS',
         // Audio
         'MUSIC_VOLUME','SFX_VOLUME',
         // Gameplay counts
