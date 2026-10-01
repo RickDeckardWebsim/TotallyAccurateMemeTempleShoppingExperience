@@ -670,10 +670,16 @@ function updateAutoDoors() {
 let cartRollingRequested = false;
 /* @tweakable Items in the cart at which it rolls with the fully loaded sound */
 const CART_ROLL_FULL_ITEMS = 12;
+/* @tweakable Cart rolling level on the smooth store floor (dB) */
+const CART_ROLL_STORE_DB = 0;
+/* @tweakable Cart rolling level on rough ground outside the store (dB; the rough-ground layer comes on top) */
+const CART_ROLL_LOT_DB = 6;
 // Cart rolling: two loops, an empty metal cart and a loaded one (SOUND_PICKS), blended by how full the
-// basket is (equal power, so the level holds through the blend). Level and pitch follow how fast you
-// push; starting and stopping fade instead of cutting. Without the picked loops: the old on/off loop.
-let cartRollLevel = 0, cartRollAt = 0;
+// basket is (equal power, so the level holds through the blend). Outside the store (rough ground) the
+// blend is louder and a rough-ground loop plays on top; the doorway crossfades. Level and pitch follow
+// how fast you push; starting and stopping fade instead of cutting. Without the picked loops: the old
+// on/off loop.
+let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0;
 function updateCartRollingSound(rolling, speed = 0) {
     const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
     if (!empty || !full) { legacyCartRollingSound(rolling); return; }
@@ -681,21 +687,28 @@ function updateCartRollingSound(rolling, speed = 0) {
     cartRollAt = now;
     const target = rolling ? Math.min(1, speed / (CONFIG.MOVE_SPEED || 5)) : 0;
     cartRollLevel += (target - cartRollLevel) * (1 - Math.exp(-dt * (target > cartRollLevel ? 10 : 6)));
+    const rough = soundEffects.cartRollRough;
     if (!rolling && cartRollLevel < 0.01) {
         cartRollLevel = 0;
-        if (!empty.paused) empty.pause();
-        if (!full.paused) full.pause();
+        for (const loop of [empty, full, rough]) if (loop && !loop.paused) loop.pause();
         return;
     }
-    if (empty.paused) empty.play().catch(() => {});
-    if (full.paused) full.play().catch(() => {});
+    const cartPos = cartObject?.position || playerBody?.position;
+    const outside = cartPos && !isInsideStore(cartPos.x, cartPos.z) ? 1 : 0;
+    cartRollOutside += (outside - cartRollOutside) * (1 - Math.exp(-dt * 6)); // ~0.5 s through the doorway
+    for (const loop of [empty, full, rough]) if (loop && loop.paused) loop.play().catch(() => {});
     const load = Math.min(1, (collectedItems?.length || 0) / CART_ROLL_FULL_ITEMS);
-    const level = Math.min(1, (CONFIG.SFX_VOLUME ?? 0.7) * BOOSTED_SFX_MULTIPLIERS.cartRoll) * Math.pow(cartRollLevel, 0.7);
-    empty.volume = level * Math.cos(load * Math.PI / 2);
-    full.volume = level * Math.sin(load * Math.PI / 2);
+    const surfaceDb = CART_ROLL_STORE_DB + (CART_ROLL_LOT_DB - CART_ROLL_STORE_DB) * cartRollOutside;
+    const push = (CONFIG.SFX_VOLUME ?? 0.7) * BOOSTED_SFX_MULTIPLIERS.cartRoll * Math.pow(cartRollLevel, 0.7);
+    const level = push * Math.pow(10, surfaceDb / 20);
+    empty.volume = Math.min(1, level * Math.cos(load * Math.PI / 2));
+    full.volume = Math.min(1, level * Math.sin(load * Math.PI / 2));
+    if (rough) rough.volume = Math.min(1, push * cartRollOutside);
     const rate = 0.85 + 0.25 * cartRollLevel;
-    empty.playbackRate = rate * Math.pow(2, (SOUND_PICKS['cart-roll-empty']?.semitones || 0) / 12);
-    full.playbackRate = rate;
+    const pitched = (job) => rate * Math.pow(2, (SOUND_PICKS[job]?.semitones || 0) / 12);
+    empty.playbackRate = pitched('cart-roll-empty');
+    full.playbackRate = pitched('cart-roll-full');
+    if (rough) rough.playbackRate = pitched('cart-roll-rough');
 }
 function legacyCartRollingSound(rolling) {
     const audio = soundEffects?.cartRoll;

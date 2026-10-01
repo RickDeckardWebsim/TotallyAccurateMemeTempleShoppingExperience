@@ -16,11 +16,14 @@ export const SOUND_PICKS = {
  },
  "cart-roll-empty": {
   "src": "sfx/cart_roll_empty.wav",
-  "take": "roll-outdoor/el-roll-outdoor-b",
-  "semitones": -8
+  "take": "roll-indoor/el-roll-indoor-rattle"
  },
  "cart-roll-full": {
   "src": "sfx/cart_roll_full.wav",
   "take": "roll-indoor/now-cart_roll-fixed"
+ },
+ "cart-roll-rough": {
+  "src": "sfx/cart_roll_rough.wav",
+  "take": "roll-outdoor/es-cart-push-concrete-pushing-perspective-1"
  }
 };
