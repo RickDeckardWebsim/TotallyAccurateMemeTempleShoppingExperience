@@ -24,6 +24,15 @@ export const SOUND_PICKS = {
  },
  "cart-roll-rough": {
   "src": "sfx/cart_roll_rough.wav",
-  "take": "roll-outdoor/es-cart-push-concrete-pushing-perspective-1"
+  "take": "roll-outdoor/es-cart-push-concrete-pushing-perspective-1",
+  "semitones": -12
+ },
+ "cart-stuck": {
+  "src": "sfx/cart_stuck_squeak.wav",
+  "take": "stuck-wheel/es-squeaky-wheels-movement-accelerating-3"
+ },
+ "cart-handle": {
+  "src": "sfx/cart_handle.mp3",
+  "take": "handle/el-grab"
  }
 };

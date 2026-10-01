@@ -172,10 +172,13 @@ export function loadSounds({ musicMuted = false } = {}) {
   }
 
   // Cart rolling: an empty cart and a loaded one, looped (game.js blends them by how full the cart is),
-  // and rough ground layered on top outside
-  for (const [name, job] of [['cartRollEmpty', 'cart-roll-empty'], ['cartRollFull', 'cart-roll-full'], ['cartRollRough', 'cart-roll-rough']]) {
+  // and on top of them rough ground outside and a squeaking wheel while it's stuck
+  for (const [name, job] of [['cartRollEmpty', 'cart-roll-empty'], ['cartRollFull', 'cart-roll-full'], ['cartRollRough', 'cart-roll-rough'], ['cartStuckSqueak', 'cart-stuck']]) {
     if (SOUND_PICKS[job]) soundEffects[name] = createSound(SOUND_PICKS[job].src, { loop: true, volume: 0 });
   }
+
+  // Grabbing / letting go of the cart handle (F)
+  if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);
 
   // Glass shattering SFX
   soundEffects.glassBreak = createSound('sfx/glass_break.wav');
@@ -199,7 +202,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   // the ones a run hears early and often: decoded now, so their first play isn't late
   preloadSounds(['footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'sfx/cart_drop.wav', 'sfx/cart_roll.wav',
     'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav',
-    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src), 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
+    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src), 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
 
   return {
     music,

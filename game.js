@@ -676,10 +676,11 @@ const CART_ROLL_STORE_DB = 0;
 const CART_ROLL_LOT_DB = 6;
 // Cart rolling: two loops, an empty metal cart and a loaded one (SOUND_PICKS), blended by how full the
 // basket is (equal power, so the level holds through the blend). Outside the store (rough ground) the
-// blend is louder and a rough-ground loop plays on top; the doorway crossfades. Level and pitch follow
+// blend is louder and a rough-ground loop plays on top; the doorway crossfades. While a wheel is stuck
+// (the cart_stuck event) a squeak plays on top too. Level and pitch follow
 // how fast you push; starting and stopping fade instead of cutting. Without the picked loops: the old
 // on/off loop.
-let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0;
+let cartRollLevel = 0, cartRollAt = 0, cartRollOutside = 0, cartRollStuck = 0;
 function updateCartRollingSound(rolling, speed = 0) {
     const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
     if (!empty || !full) { legacyCartRollingSound(rolling); return; }
@@ -687,16 +688,17 @@ function updateCartRollingSound(rolling, speed = 0) {
     cartRollAt = now;
     const target = rolling ? Math.min(1, speed / (CONFIG.MOVE_SPEED || 5)) : 0;
     cartRollLevel += (target - cartRollLevel) * (1 - Math.exp(-dt * (target > cartRollLevel ? 10 : 6)));
-    const rough = soundEffects.cartRollRough;
+    const rough = soundEffects.cartRollRough, squeak = soundEffects.cartStuckSqueak;
     if (!rolling && cartRollLevel < 0.01) {
         cartRollLevel = 0;
-        for (const loop of [empty, full, rough]) if (loop && !loop.paused) loop.pause();
+        for (const loop of [empty, full, rough, squeak]) if (loop && !loop.paused) loop.pause();
         return;
     }
     const cartPos = cartObject?.position || playerBody?.position;
     const outside = cartPos && !isInsideStore(cartPos.x, cartPos.z) ? 1 : 0;
     cartRollOutside += (outside - cartRollOutside) * (1 - Math.exp(-dt * 6)); // ~0.5 s through the doorway
-    for (const loop of [empty, full, rough]) if (loop && loop.paused) loop.play().catch(() => {});
+    cartRollStuck += ((cartStuckActive ? 1 : 0) - cartRollStuck) * (1 - Math.exp(-dt * 5));
+    for (const loop of [empty, full, rough, squeak]) if (loop && loop.paused) loop.play().catch(() => {});
     const load = Math.min(1, (collectedItems?.length || 0) / CART_ROLL_FULL_ITEMS);
     const surfaceDb = CART_ROLL_STORE_DB + (CART_ROLL_LOT_DB - CART_ROLL_STORE_DB) * cartRollOutside;
     const push = (CONFIG.SFX_VOLUME ?? 0.7) * BOOSTED_SFX_MULTIPLIERS.cartRoll * Math.pow(cartRollLevel, 0.7);
@@ -709,6 +711,13 @@ function updateCartRollingSound(rolling, speed = 0) {
     empty.playbackRate = pitched('cart-roll-empty');
     full.playbackRate = pitched('cart-roll-full');
     if (rough) rough.playbackRate = pitched('cart-roll-rough');
+    if (squeak) { squeak.volume = Math.min(1, push * cartRollStuck); squeak.playbackRate = pitched('cart-stuck'); }
+}
+// Grabbing or letting go of the cart handle: the picked handle sound (fallback: the old one, if any).
+function playCartHandleSound(fallback) {
+    const sound = soundEffects?.cartHandle || fallback;
+    if (!sound) return;
+    try { sound.currentTime = 0; sound.play().catch(() => {}); } catch (_) {}
 }
 function legacyCartRollingSound(rolling) {
     const audio = soundEffects?.cartRoll;
@@ -11269,12 +11278,12 @@ function setupEvents() {
         if (event.code === kb.cart && !SQ.isMovementLocked()) {
             if (cartAttached) {
                 cartAttached = false;
-                try { if (soundEffects.cartDrop) { soundEffects.cartDrop.currentTime = 0; soundEffects.cartDrop.play(); } } catch(_) {}
+                playCartHandleSound(soundEffects.cartDrop);
                 displayMessage(`Detached from cart. You can now grab items off shelves! (Press ${formatKeyName(kb.cart)} to push cart)`, 2200);
             } else {
                 if (canInteractWithCart()) {
                     cartAttached = true;
-                    try { if (soundEffects.grab) { soundEffects.grab.currentTime = 0; soundEffects.grab.play(); } } catch(_) {}
+                    playCartHandleSound(soundEffects.grab);
                     displayMessage("Attached to shopping cart!", 1500);
                 } else {
                     displayMessage(`Get closer to your shopping cart to attach! (Press ${formatKeyName(kb.cart)})`, 1800);
