@@ -18,6 +18,7 @@ import * as Nuke from './src/nuke.js';
 import { bankSavings, pickCustomerSkin, equippedCartSkin } from './src/shop.js';
 import { applyCartFinish, applyCartSkin } from './src/cart-skins.js';
 import { buildCartQuarterSlot } from './src/cart-quarter-slot.js';
+import * as CartPhys from './src/cart-physics.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -5088,7 +5089,8 @@ function updateCustomerScuffle(now, delta) {
         // inventory, shopping list progress, and gum craving.
         if (cartCatchActive) {
             const local = cart3D.worldToLocal(_scuffleLocal.set(item.body.position.x, item.body.position.y, item.body.position.z));
-            if (Math.abs(local.x) < 0.48 && Math.abs(local.z) < 0.62 && local.y > 0.3 && local.y < 1.25) {
+            if (Math.abs(local.x) < CartPhys.CART_BASKET.halfW && Math.abs(local.z) < CartPhys.CART_BASKET.halfL &&
+                local.y > CartPhys.CART_BASKET.floorY - 0.05 && local.y < CartPhys.CART_BASKET.rimY + 0.3) {
                 catchItemInCart(item, local);
                 displayMessage(`💥 A flying ${item.name} landed in your cart!`, 2400, true);
                 customerScuffleProjectiles.splice(i, 1);
@@ -5236,8 +5238,13 @@ function getMasterCartGeometry() {
 }
 
 // Helper to build an authentic hollow wire supermarket cart model merged into a single BufferGeometry
-function buildWireCartGroup(cartColor = CONFIG.CART_COLOR || 0xD32F2F, skin = null) {
+function buildWireCartGroup(cartColor = CONFIG.CART_COLOR || 0xD32F2F, skin = null, scale = 1) {
     const cart3D = new THREE.Group();
+    // Model parts live in a scaled subgroup; items placed in cart3D keep their own size.
+    const visual = new THREE.Group();
+    visual.scale.setScalar(scale);
+    cart3D.add(visual);
+    cart3D.userData.visual = visual;
     const masterGeo = getMasterCartGeometry();
 
     const chromeMaterial = new THREE.MeshStandardMaterial({ 
@@ -5264,7 +5271,7 @@ function buildWireCartGroup(cartColor = CONFIG.CART_COLOR || 0xD32F2F, skin = nu
     const mesh = new THREE.Mesh(masterGeo, [chromeMaterial, cartMaterial, darkMetalMaterial, wheelMaterial]);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
-    cart3D.add(mesh);
+    visual.add(mesh);
 
     // Invisible solid occlusion hull (5 basket walls + chassis) so rays cannot pass through cart walls/bottom
     const occMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
@@ -5290,16 +5297,16 @@ function buildWireCartGroup(cartColor = CONFIG.CART_COLOR || 0xD32F2F, skin = nu
 
     const occGroup = new THREE.Group();
     occGroup.add(bBot, bFront, bBack, bLeft, bRight, bChassis);
-    cart3D.add(occGroup);
+    visual.add(occGroup);
     cart3D.userData.occlusionHull = occGroup;
-    if (skin) applyCartSkin(cart3D, cartColor, skin);
-    if (isCustomGame) cart3D.add(buildCartQuarterSlot());
+    if (skin) applyCartSkin(visual, cartColor, skin);
+    if (isCustomGame) visual.add(buildCartQuarterSlot());
 
     return cart3D;
 }
 
 document.addEventListener('shop:cart-skin-change', () => {
-    applyCartSkin(cart3D, CONFIG.CART_COLOR || 0xD32F2F, equippedCartSkin());
+    applyCartSkin(cart3D?.userData.visual || cart3D, CONFIG.CART_COLOR || 0xD32F2F, equippedCartSkin());
 });
 
 // Create an identical detailed wire cart model and physics for a customer
@@ -10528,12 +10535,39 @@ function createPlayer() {
     }
 }
 
+CartPhys.initCartPhysics({
+    getWorld: () => world,
+    getCart3D: () => cart3D,
+    getCartObject: () => cartObject,
+    getAllItems: () => allItems,
+    getCollectedItems: () => collectedItems,
+    getHeldItem: () => heldItem,
+    getCartBaby: () => cartBaby,
+    isItemDropping: (item) => cartDroppingItems.some(anim => anim.item === item),
+    massOf: (item) => itemPhysicsMass(item),
+    gravity: CONFIG.GRAVITY || 9.8,
+    ignoredBodies: () => autoDoors ? [autoDoors.leftBody, autoDoors.rightBody] : [],
+    onCatch: (item, localPos, localQuat, localVel) => {
+        const fromScuffle = customerScuffleProjectiles.some(p => p.item === item);
+        catchItemInCart(item, localPos, localQuat, localVel);
+        if (fromScuffle) displayMessage(`💥 A flying ${item.name} landed in your cart!`, 2400, true);
+    },
+    onBump: (strength) => {
+        try {
+            if (!soundEffects.cartAdd) return;
+            const bump = soundEffects.cartAdd.cloneNode();
+            bump.volume = Math.min(1, soundEffects.cartAdd.volume * (0.35 + 0.65 * strength));
+            bump.play().catch(() => {});
+        } catch (_) {}
+    },
+});
+
 function createShoppingCart() {
     // Create a cart that stays in front of the player
     cartObject = new THREE.Group();
     scene.add(cartObject);
 
-    cart3D = buildWireCartGroup(CONFIG.CART_COLOR || 0xD32F2F, equippedCartSkin());
+    cart3D = buildWireCartGroup(CONFIG.CART_COLOR || 0xD32F2F, equippedCartSkin(), CartPhys.CART_SCALE);
     cartObject.add(cart3D);
     cartObject.position.set(0, 0, -24.5);
 
@@ -10550,7 +10584,7 @@ function createCartBaby() {
     cartBabyActionCount = 0;
 
     const baby = new THREE.Group();
-    baby.position.set(0, 0, 0.05);
+    baby.position.set(0, CartPhys.CART_BABY_LIFT, 0.05);
     cart3D.add(baby);
     cartBaby = baby;
 
@@ -10671,24 +10705,16 @@ function launchCartBabyItem(item) {
     }
     item.isStatic = false;
 
-    const targetX = (Math.random() - 0.5) * 0.38;
-    const targetZ = (Math.random() - 0.5) * 0.58;
-    const halfH = item.size?.[1] ? item.size[1] * 0.5 : 0.15;
-    let targetY = 0.375 + halfH;
-    collectedItems.forEach(other => {
-        if (!other || !other.inCart || !other.mesh) return;
-        if (Math.hypot(other.mesh.position.x - targetX, other.mesh.position.z - targetZ) < 0.22) {
-            const otherHalfH = other.size?.[1] ? other.size[1] * 0.5 : 0.15;
-            targetY = Math.max(targetY, other.mesh.position.y + otherHalfH + halfH);
-        }
-    });
+    const B = CartPhys.CART_BASKET;
+    const restQuat = CartPhys.cartRestingQuat(item);
+    const targetPos = CartPhys.cartDropPoint(item, (Math.random() - 0.5) * B.halfW * 1.2, (Math.random() - 0.5) * B.halfL * 1.2, undefined, restQuat);
 
     cartDroppingItems.push({
         item,
         startPos: item.mesh.position.clone(),
-        targetPos: new THREE.Vector3(targetX, Math.min(0.85, targetY), targetZ),
+        targetPos,
         startRot: item.mesh.rotation.clone(),
-        targetRot: new THREE.Euler((Math.random() - 0.5) * 0.2, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.2),
+        targetRot: new THREE.Euler().setFromQuaternion(restQuat),
         duration: 0.5,
         elapsed: 0,
         arcHeight: 0.18,
@@ -13157,7 +13183,7 @@ function handleItemDropOrPlacement() {
         else heldWorldPos.copy(camera.position).add(dir.clone().multiplyScalar(1.0));
 
         const localHeldPos = cart3D.worldToLocal(heldWorldPos.clone());
-        const isOverCart = Math.abs(localHeldPos.x) < 0.50 && Math.abs(localHeldPos.z) < 0.70 && localHeldPos.y > 0.15 && localHeldPos.y < 2.5;
+        const isOverCart = Math.abs(localHeldPos.x) < 0.50 * CartPhys.CART_SCALE && Math.abs(localHeldPos.z) < 0.70 * CartPhys.CART_SCALE && localHeldPos.y > 0.15 && localHeldPos.y < 2.5;
         const isLookingAtCart = cartHit.length > 0 && cartHit[0].distance <= (CONFIG.ARM_REACH + 1.2);
 
         if (isLookingAtCart || isOverCart) {
@@ -13252,35 +13278,14 @@ function dropHeldItemIntoCart(hitLocal) {
     if (item.mesh) item.mesh.getWorldPosition(startWorldPos);
     else startWorldPos.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(1.0));
 
-    // Calculate landing local coordinates inside cart3D container
-    let targetX = 0;
-    let targetZ = 0;
-    if (hitLocal) {
-        targetX = THREE.MathUtils.clamp(hitLocal.x + (Math.random() - 0.5) * 0.06, -0.26, 0.26);
-        targetZ = THREE.MathUtils.clamp(hitLocal.z + (Math.random() - 0.5) * 0.06, -0.42, 0.42);
-    } else {
-        targetX = (Math.random() - 0.5) * 0.40;
-        targetZ = (Math.random() - 0.5) * 0.65;
-    }
-
-    const halfH = item.size ? (item.size[1] * 0.5) : 0.15;
-    let targetY = 0.375 + halfH;
-
-    // Stacking above items in cart
-    collectedItems.forEach(other => {
-        if (other && other !== item && other.mesh && other.inCart) {
-            const dx = other.mesh.position.x - targetX;
-            const dz = other.mesh.position.z - targetZ;
-            if (Math.hypot(dx, dz) < 0.22) {
-                const otherHalfH = other.size ? (other.size[1] * 0.5) : 0.15;
-                const stackedY = other.mesh.position.y + otherHalfH + halfH;
-                if (stackedY > targetY) targetY = stackedY;
-            }
-        }
-    });
-    targetY = Math.min(0.85, targetY);
-
-    const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+    // Glide to just above whatever is piled under the aim point; the basket
+    // physics takes over from there and drops it into place.
+    const B = CartPhys.CART_BASKET;
+    const aimX = hitLocal ? hitLocal.x + (Math.random() - 0.5) * 0.06 : (Math.random() - 0.5) * B.halfW;
+    const aimZ = hitLocal ? hitLocal.z + (Math.random() - 0.5) * 0.06 : (Math.random() - 0.5) * B.halfL;
+    const restQuat = CartPhys.cartRestingQuat(item);
+    const targetPos = CartPhys.cartDropPoint(item, aimX, aimZ, undefined, restQuat);
+    const targetY = targetPos.y;
 
     // Attach mesh directly to cart3D
     if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
@@ -13290,12 +13295,8 @@ function dropHeldItemIntoCart(hitLocal) {
     const startLocal = cart3D.worldToLocal(startWorldPos.clone());
     item.mesh.position.copy(startLocal);
 
-    // Natural slight tilt rotation on landing
-    const targetEuler = new THREE.Euler(
-        (Math.random() - 0.5) * 0.2,
-        Math.random() * Math.PI * 2,
-        (Math.random() - 0.5) * 0.2
-    );
+    // Set down the way a shopper packs a cart (tall items on their side)
+    const targetEuler = new THREE.Euler().setFromQuaternion(restQuat);
 
     // Remove Cannon body while contained in cart
     if (item.body) {
@@ -13315,6 +13316,7 @@ function dropHeldItemIntoCart(hitLocal) {
     });
 }
 
+const _cartLetGoVel = { x: 0, y: -0.6, z: 0 };
 function updateCartDroppingItems(delta) {
     for (let i = cartDroppingItems.length - 1; i >= 0; i--) {
         const anim = cartDroppingItems[i];
@@ -13334,6 +13336,7 @@ function updateCartDroppingItems(delta) {
         if (t >= 1) {
             anim.item.mesh.position.copy(anim.targetPos);
             anim.item.mesh.rotation.copy(anim.targetRot);
+            CartPhys.addItemToCart(anim.item, anim.item.mesh.position, anim.item.mesh.quaternion, _cartLetGoVel);
             finalizeItemInCart(anim.item);
             if (anim.babyGrabbed) {
                 displayRngNotification(`🍼 Your baby grabbed ${anim.item.name}!`, 4200);
@@ -13399,42 +13402,36 @@ function giveManagerGift(itemName) {
     item.mesh.removeFromParent();
     cart3D.add(item.mesh);
     item.mesh.visible = true;
-    const halfHeight = (item.size?.[1] || 0.3) / 2;
-    const x = (Math.random() - 0.5) * 0.42;
-    const z = (Math.random() - 0.5) * 0.65;
-    let y = 0.375 + halfHeight;
-    for (const other of collectedItems) {
-        if (!other.inCart || !other.mesh) continue;
-        if (Math.hypot(other.mesh.position.x - x, other.mesh.position.z - z) < 0.22) {
-            y = Math.max(y, other.mesh.position.y + (other.size?.[1] || 0.3) / 2 + halfHeight);
-        }
-    }
-    item.mesh.position.set(x, Math.min(y, 0.85), z);
-    item.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    const B = CartPhys.CART_BASKET;
+    CartPhys.cartRestingQuat(item, item.mesh.quaternion);
+    CartPhys.cartDropPoint(item, (Math.random() - 0.5) * B.halfW, (Math.random() - 0.5) * B.halfL, item.mesh.position, item.mesh.quaternion);
     if (item.body) {
         world?.removeBody(item.body);
         item.body = null;
     }
+    CartPhys.addItemToCart(item, item.mesh.position, item.mesh.quaternion, null);
     item.isManagerGift = true;
     finalizeItemInCart(item);
     return true;
 }
 
-function catchItemInCart(item, localPos) {
+// Hand a loose item that has landed inside the basket over to the basket
+// physics, keeping its motion so it tumbles in naturally.
+function catchItemInCart(item, localPos, localQuat = null, localVel = null) {
     if (item.body) {
         try { world.removeBody(item.body); } catch(_) {}
         item.body = null;
     }
     if (item.mesh.parent) item.mesh.parent.remove(item.mesh);
     cart3D.add(item.mesh);
-
-    const halfH = item.size ? (item.size[1] * 0.5) : 0.15;
-    const clampedX = THREE.MathUtils.clamp(localPos.x, -0.26, 0.26);
-    const clampedZ = THREE.MathUtils.clamp(localPos.z, -0.42, 0.42);
-    const clampedY = Math.max(0.375 + halfH, Math.min(0.85, localPos.y));
-
-    item.mesh.position.set(clampedX, clampedY, clampedZ);
+    item.mesh.position.copy(localPos);
+    if (localQuat) item.mesh.quaternion.copy(localQuat);
+    item.isDropping = false;
+    item.isAccidentalDrop = false;
+    item.hasLanded = true;
+    CartPhys.addItemToCart(item, localPos, localQuat || item.mesh.quaternion, localVel);
     finalizeItemInCart(item);
+    try { if (soundEffects.cartAdd) { soundEffects.cartAdd.currentTime = 0; soundEffects.cartAdd.play().catch(() => {}); } } catch (_) {}
 }
 
 function releaseItem(isAccidental = false) {
@@ -15829,6 +15826,7 @@ function animate() {
         cartFlingVel.y += -9.8 * 3 * delta;
         if (cartObject.position.y <= cartFlingStartY) {
             cartObject.position.y = cartFlingStartY; cartFlingActive = false;
+            CartPhys.wakeCartItems(1.2);
         }
     }
 
@@ -16676,6 +16674,13 @@ function animate() {
         direction.y = 0;
         direction.normalize();
 
+        // The cart can't go through shelves or walls: walking it into one stops
+        // you, turning it into one stops the swing.
+        const cartSolve = CartPhys.solveAttachedCart(playerBody, Math.atan2(direction.x, direction.z), performance.now());
+        camera.position.x += cartSolve.pushX;
+        camera.position.z += cartSolve.pushZ;
+        direction.set(Math.sin(cartSolve.yaw), 0, Math.cos(cartSolve.yaw));
+
         const rightDir = _cartRight.crossVectors(direction, WORLD_UP).normalize();
 
         // Subtle nuanced sway
@@ -16686,7 +16691,7 @@ function animate() {
 
         // Position cart in front of player with gentle sway
         cartObject.position.copy(playerBody.position)
-            .add(direction.multiplyScalar(1.5))
+            .add(direction.multiplyScalar(CartPhys.CART_FOLLOW_DIST))
             .addScaledVector(rightDir, cartSwayLateral);
         cartObject.position.y = cartSwayVertical;
 
@@ -16700,6 +16705,11 @@ function animate() {
         cartObject.rotation.x = THREE.MathUtils.lerp(cartObject.rotation.x, 0, delta * 6);
         cartObject.position.y = THREE.MathUtils.lerp(cartObject.position.y || 0, 0, delta * 6);
     }
+    if (!cartAttached || cartFlingActive || isCheckout) CartPhys.resetCartHeading();
+
+    // Cart hull in the world (thrown items land in it) and the basket contents
+    CartPhys.updateCartHull(delta, !!(cartObject?.visible && gameStarted && !isCheckout));
+    CartPhys.stepCartPhysics(delta);
 
     // Update Store Worker Restocker
     updateStoreWorker(delta);
