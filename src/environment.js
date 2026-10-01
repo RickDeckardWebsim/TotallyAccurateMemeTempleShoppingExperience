@@ -116,7 +116,7 @@ export function setupScene(CONFIG) {
   const textureLoader = new THREE.TextureLoader();
   
   // Load daytime sky texture
-  const skyTexture = textureLoader.load('sky_39_2k.png');
+  const skyTexture = textureLoader.load('sky_39_2k.webp');
   skyTexture.mapping = THREE.EquirectangularReflectionMapping;
   skyTexture.colorSpace = THREE.SRGBColorSpace;
   scene.background = skyTexture;

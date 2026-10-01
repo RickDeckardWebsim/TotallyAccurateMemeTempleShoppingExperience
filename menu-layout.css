@@ -1,5 +1,5 @@
 /* ---------- Responsive main menu ----------
-   The title is baked into menu-bg.png (3:2), so the art is always shown whole
+   The title is baked into menu-bg.webp (3:2), so the art is always shown whole
    ("contain") over a blurred copy of itself that fills whatever space is left.
    Buttons are laid out into that leftover space for the current aspect ratio. */
 
@@ -16,7 +16,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    background-image: url("menu-bg.png");
+    background-image: url("menu-bg.webp");
     background-repeat: no-repeat;
     pointer-events: none;
 }

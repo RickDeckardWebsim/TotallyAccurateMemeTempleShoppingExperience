@@ -120,7 +120,7 @@ function fmtElapsed(ms) {
 function displayName(g) { return g.username ? `@${g.username}` : 'Guest shopper'; }
 
 function avatarUrl(g) {
-    return g.username ? `https://images.websim.com/avatar/${encodeURIComponent(g.username)}` : 'loading dude.png';
+    return g.username ? `https://images.websim.com/avatar/${encodeURIComponent(g.username)}` : 'loading dude.webp';
 }
 
 function gameElapsed(g) { return Date.now() - net.toLocalTime(g.startedAt); }
