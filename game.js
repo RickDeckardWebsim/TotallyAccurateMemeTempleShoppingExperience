@@ -13549,8 +13549,21 @@ function updateCartDroppingItems(delta) {
     }
 }
 
+// Items landing in the cart: each item's own drop sound (SOUND_PICKS 'drop-<item>'), layered on the list
+// chime (or run.wav) that already plays. A copy per drop, so items landing close together overlap.
+const itemDropSounds = new Map();
+function playItemDropSound(item) {
+    const slug = (item?.isCheckoutGum || item?.name === 'Gum') ? 'chewing-gum' : String(item?.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const pick = SOUND_PICKS['drop-' + slug];
+    if (!pick) return;
+    let sound = itemDropSounds.get(slug);
+    if (!sound) { sound = createSound(pick.src); itemDropSounds.set(slug, sound); }
+    try { const s = sound.cloneNode(); s.volume = CONFIG.SFX_VOLUME ?? 0.7; s.play().catch(() => {}); } catch (_) {}
+}
+
 function finalizeItemInCart(item) {
     item.inCart = true;
+    playItemDropSound(item);
     item.isStatic = true;
     if (!collectedItems.includes(item)) {
         collectedItems.push(item);

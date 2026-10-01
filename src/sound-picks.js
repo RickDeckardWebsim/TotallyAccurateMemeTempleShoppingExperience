@@ -148,5 +148,194 @@ export const SOUND_PICKS = {
  "npc-cart-roll": {
   "src": "sfx/npc_cart_roll.wav",
   "take": "roll-indoor/el-roll-indoor-rattle"
+ },
+ "drop-apples": {
+  "src": "sfx/drops/apples.mp3",
+  "take": "drop-apples/el-drop-apples",
+  "auto": true
+ },
+ "drop-bananas": {
+  "src": "sfx/drops/bananas.mp3",
+  "take": "drop-bananas/el-drop-bananas",
+  "auto": true
+ },
+ "drop-batteries": {
+  "src": "sfx/drops/batteries.mp3",
+  "take": "drop-batteries/el-drop-batteries",
+  "auto": true
+ },
+ "drop-bread": {
+  "src": "sfx/drops/bread.mp3",
+  "take": "item-bag/es-plastic-bag-items-inside-drop-table",
+  "lowpassHz": 1986
+ },
+ "drop-canned-goods": {
+  "src": "sfx/drops/canned-goods.mp3",
+  "take": "drop-canned-goods/el-drop-canned-goods",
+  "auto": true
+ },
+ "drop-cereal": {
+  "src": "sfx/drops/cereal.mp3",
+  "take": "drop-cereal/el-drop-cereal",
+  "auto": true
+ },
+ "drop-cheese": {
+  "src": "sfx/drops/cheese.mp3",
+  "take": "drop-cheese/el-drop-cheese",
+  "auto": true
+ },
+ "drop-chewing-gum": {
+  "src": "sfx/drops/chewing-gum.mp3",
+  "take": "drop-chewing-gum/el-drop-chewing-gum",
+  "auto": true
+ },
+ "drop-chicken": {
+  "src": "sfx/drops/chicken.mp3",
+  "take": "drop-chicken/el-drop-chicken",
+  "auto": true
+ },
+ "drop-chocolate-bars": {
+  "src": "sfx/drops/chocolate-bars.mp3",
+  "take": "drop-chocolate-bars/el-drop-chocolate-bars",
+  "auto": true
+ },
+ "drop-cleaning-supplies": {
+  "src": "sfx/drops/cleaning-supplies.mp3",
+  "take": "drop-cleaning-supplies/el-drop-cleaning-supplies",
+  "auto": true
+ },
+ "drop-coffee": {
+  "src": "sfx/drops/coffee.mp3",
+  "take": "drop-coffee/el-drop-coffee",
+  "auto": true
+ },
+ "drop-cooking-oil": {
+  "src": "sfx/drops/cooking-oil.mp3",
+  "take": "drop-cooking-oil/el-drop-cooking-oil",
+  "auto": true
+ },
+ "drop-dog-food": {
+  "src": "sfx/drops/dog-food.mp3",
+  "take": "drop-dog-food/el-drop-dog-food",
+  "auto": true
+ },
+ "drop-eggs": {
+  "src": "sfx/drops/eggs.mp3",
+  "take": "drop-eggs/el-drop-eggs",
+  "auto": true
+ },
+ "drop-flowers": {
+  "src": "sfx/drops/flowers.mp3",
+  "take": "drop-flowers/el-drop-flowers",
+  "auto": true
+ },
+ "drop-grapes": {
+  "src": "sfx/drops/grapes.mp3",
+  "take": "drop-grapes/el-drop-grapes",
+  "auto": true
+ },
+ "drop-ice-cream": {
+  "src": "sfx/drops/ice-cream.mp3",
+  "take": "drop-ice-cream/el-drop-ice-cream",
+  "auto": true
+ },
+ "drop-ketchup": {
+  "src": "sfx/drops/ketchup.mp3",
+  "take": "drop-ketchup/el-drop-ketchup",
+  "auto": true
+ },
+ "drop-lettuce": {
+  "src": "sfx/drops/lettuce.mp3",
+  "take": "drop-lettuce/el-drop-lettuce",
+  "auto": true
+ },
+ "drop-milk": {
+  "src": "sfx/drops/milk.mp3",
+  "take": "drop-milk/el-drop-milk"
+ },
+ "drop-mustard": {
+  "src": "sfx/drops/mustard.mp3",
+  "take": "drop-mustard/el-drop-mustard",
+  "auto": true
+ },
+ "drop-orange-juice": {
+  "src": "sfx/drops/orange-juice.mp3",
+  "take": "drop-orange-juice/el-drop-orange-juice",
+  "auto": true
+ },
+ "drop-pants": {
+  "src": "sfx/drops/pants.mp3",
+  "take": "drop-pants/el-drop-pants",
+  "auto": true
+ },
+ "drop-pasta-sauce": {
+  "src": "sfx/drops/pasta-sauce.mp3",
+  "take": "drop-pasta-sauce/el-drop-pasta-sauce",
+  "auto": true
+ },
+ "drop-pasta": {
+  "src": "sfx/drops/pasta.mp3",
+  "take": "drop-pasta/el-drop-pasta",
+  "auto": true
+ },
+ "drop-peanut-butter": {
+  "src": "sfx/drops/peanut-butter.mp3",
+  "take": "drop-peanut-butter/el-drop-peanut-butter",
+  "auto": true
+ },
+ "drop-pizza": {
+  "src": "sfx/drops/pizza.mp3",
+  "take": "drop-pizza/el-drop-pizza",
+  "auto": true
+ },
+ "drop-potatoes": {
+  "src": "sfx/drops/potatoes.mp3",
+  "take": "drop-potatoes/el-drop-potatoes",
+  "auto": true
+ },
+ "drop-shampoo": {
+  "src": "sfx/drops/shampoo.mp3",
+  "take": "drop-shampoo/el-drop-shampoo",
+  "auto": true
+ },
+ "drop-soda": {
+  "src": "sfx/drops/soda.mp3",
+  "take": "drop-soda/el-drop-soda",
+  "auto": true
+ },
+ "drop-steak": {
+  "src": "sfx/drops/steak.mp3",
+  "take": "drop-steak/el-drop-steak",
+  "auto": true
+ },
+ "drop-sugar": {
+  "src": "sfx/drops/sugar.mp3",
+  "take": "drop-sugar/el-drop-sugar",
+  "auto": true
+ },
+ "drop-toilet-paper": {
+  "src": "sfx/drops/toilet-paper.mp3",
+  "take": "drop-toilet-paper/el-drop-toilet-paper",
+  "auto": true
+ },
+ "drop-towels": {
+  "src": "sfx/drops/towels.mp3",
+  "take": "drop-towels/el-drop-towels",
+  "auto": true
+ },
+ "drop-toys": {
+  "src": "sfx/drops/toys.mp3",
+  "take": "drop-toys/el-drop-toys",
+  "auto": true
+ },
+ "drop-water-bottles": {
+  "src": "sfx/drops/water-bottles.mp3",
+  "take": "drop-water-bottles/el-drop-water-bottles",
+  "auto": true
+ },
+ "drop-watermelon": {
+  "src": "sfx/drops/watermelon.mp3",
+  "take": "drop-watermelon/el-drop-watermelon",
+  "auto": true
  }
 };
