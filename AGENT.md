@@ -1,6 +1,6 @@
 # Shopping Simulator
 
-This directory is the complete source of a websim project (id `sizjke782syhrd0blowb`, checked out from version 17).
+This directory is the complete source of a websim project (id `sizjke782syhrd0blowb`, checked out from version 19).
 Live site: https://websim.com/p/sizjke782syhrd0blowb
 
 ## Runtime contract — read before editing

@@ -1470,6 +1470,185 @@ function createGumModel(flavorColor = 0x16a34a, flavorName = 'SPEARMINT') {
     return group;
 }
 
+
+// Uniform size reduction applied to every product model.
+const ITEM_SCALE = 0.85;
+
+// Lofts a closed tube through stacked superellipse rings (n=2 circle, higher =
+// squarer). Rings: { y, hx, hz, n, cx, cz }. Bottom/top get flat caps.
+function loftRingsGeometry(rings, segs = 32) {
+    const pos = [], idx = [];
+    const ringPt = (r, a) => {
+        const c = Math.cos(a), s = Math.sin(a), e = 2 / r.n;
+        return [r.cx + Math.sign(c) * Math.pow(Math.abs(c), e) * r.hx, r.y,
+                r.cz + Math.sign(s) * Math.pow(Math.abs(s), e) * r.hz];
+    };
+    rings.forEach(r => { for (let i = 0; i < segs; i++) pos.push(...ringPt(r, (i / segs) * Math.PI * 2)); });
+    for (let j = 0; j < rings.length - 1; j++) {
+        for (let i = 0; i < segs; i++) {
+            const a = j * segs + i, b = j * segs + (i + 1) % segs;
+            const c = a + segs, d = b + segs;
+            idx.push(a, c, b, b, c, d);
+        }
+    }
+    const capCenter = (r, ringIndex, up) => {
+        const ci = pos.length / 3;
+        pos.push(r.cx, r.y, r.cz);
+        for (let i = 0; i < segs; i++) {
+            const a = ringIndex * segs + i, b = ringIndex * segs + (i + 1) % segs;
+            if (up) idx.push(ci, b, a); else idx.push(ci, a, b);
+        }
+    };
+    capCenter(rings[0], 0, false);
+    capCenter(rings[rings.length - 1], rings.length - 1, true);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+}
+
+const _itemAssetCache = {};
+function cachedItemAsset(key, make) {
+    return _itemAssetCache[key] || (_itemAssetCache[key] = make());
+}
+
+function buildMilkJugModel() {
+    const group = new THREE.Group();
+    const jugMat = new THREE.MeshStandardMaterial({ color: 0xF4F6F8, roughness: 0.38, metalness: 0.02 });
+    // Gallon jug: squared body, sloped shoulder that rises to an off-centre neck.
+    const neckX = -0.08, neckZ = 0.04;
+    const body = new THREE.Mesh(cachedItemAsset('milkBodyGeo', () => loftRingsGeometry([
+        { y: 0.00, hx: 0.17, hz: 0.17, n: 4,   cx: 0,            cz: 0 },
+        { y: 0.025, hx: 0.20, hz: 0.20, n: 5,  cx: 0,            cz: 0 },
+        { y: 0.27, hx: 0.198, hz: 0.198, n: 5, cx: 0,            cz: 0 }, // grip waist
+        { y: 0.50, hx: 0.20, hz: 0.20, n: 5,   cx: 0,            cz: 0 },
+        { y: 0.58, hx: 0.185, hz: 0.185, n: 4.5, cx: neckX * 0.15, cz: neckZ * 0.15 },
+        { y: 0.66, hx: 0.14, hz: 0.14, n: 3.2, cx: neckX * 0.5,  cz: neckZ * 0.5 },
+        { y: 0.72, hx: 0.085, hz: 0.085, n: 2.3, cx: neckX * 0.9, cz: neckZ * 0.9 },
+        { y: 0.75, hx: 0.062, hz: 0.062, n: 2, cx: neckX,        cz: neckZ },
+        { y: 0.80, hx: 0.062, hz: 0.062, n: 2, cx: neckX,        cz: neckZ }
+    ], 32)), jugMat);
+
+    const cap = new THREE.Mesh(
+        cachedItemAsset('milkCapGeo', () => new THREE.CylinderGeometry(0.068, 0.068, 0.05, 18)),
+        new THREE.MeshStandardMaterial({ color: 0x1976D2, roughness: 0.35 })
+    );
+    cap.position.set(neckX, 0.825, neckZ);
+
+    // Hollow carry handle on the back corner of the shoulder.
+    const handle = new THREE.Mesh(cachedItemAsset('milkHandleGeo', () => new THREE.TubeGeometry(
+        new THREE.CatmullRomCurve3([
+            new THREE.Vector3(0.02, 0.70, -0.02),
+            new THREE.Vector3(0.14, 0.70, -0.10),
+            new THREE.Vector3(0.21, 0.62, -0.15),
+            new THREE.Vector3(0.22, 0.50, -0.16),
+            new THREE.Vector3(0.17, 0.42, -0.13)
+        ]), 14, 0.032, 8, false)), jugMat);
+
+    // Flat printed label on the front face.
+    const labelTex = cachedItemAsset('milkLabelTex', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 448;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 512, 448);
+        ctx.fillStyle = '#1565C0'; ctx.fillRect(0, 0, 512, 130);
+        ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center';
+        ctx.font = 'bold 30px sans-serif'; ctx.fillText('★ GRADE B+ ★', 256, 42);
+        ctx.font = 'bold 56px "Arial Black", sans-serif';
+        fitText(ctx, 'LIZARD MILK', 256, 108, 480);
+        ctx.fillStyle = '#4CAF50'; ctx.beginPath(); ctx.ellipse(256, 300, 220, 80, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1565C0'; ctx.font = 'bold 38px "Arial Black", sans-serif';
+        fitText(ctx, '1 GALLON', 256, 200, 480);
+        ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 26px sans-serif';
+        fitText(ctx, 'COLD-BLOODED • 3.78 L', 256, 310, 400);
+        ctx.fillStyle = '#555555'; ctx.font = 'bold 22px sans-serif';
+        fitText(ctx, 'SUN-BASKED • SCALE-FREE (MOSTLY)', 256, 420, 480);
+        return new THREE.CanvasTexture(canvas);
+    });
+    const label = new THREE.Mesh(
+        cachedItemAsset('milkLabelGeo', () => new THREE.PlaneGeometry(0.30, 0.26)),
+        new THREE.MeshBasicMaterial({ map: labelTex })
+    );
+    label.position.set(0, 0.28, 0.2005);
+
+    group.add(body, cap, handle, label);
+    return group;
+}
+
+function buildPotatoBagModel() {
+    const group = new THREE.Group();
+    // Lumpy sack silhouette (lathe) that gathers into a tied top.
+    const lumpyLathe = (scale) => {
+        const prof = [[0.0, 0.0], [0.17, 0.01], [0.25, 0.06], [0.28, 0.16], [0.27, 0.28],
+                      [0.22, 0.38], [0.12, 0.45], [0.04, 0.49], [0.03, 0.52]]
+            .map(([r, y]) => new THREE.Vector2(r * scale, y));
+        const g = new THREE.LatheGeometry(prof, 16);
+        const p = g.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+            const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+            const a = Math.atan2(z, x);
+            const bump = 1 + 0.07 * Math.sin(a * 5 + y * 9) * Math.sin(y * 17 + a * 2) * Math.min(1, y * 6);
+            p.setX(i, x * bump); p.setZ(i, z * bump);
+        }
+        g.computeVertexNormals();
+        return g;
+    };
+    const potatoes = new THREE.Mesh(
+        cachedItemAsset('potatoInnerGeo', () => lumpyLathe(0.95)),
+        new THREE.MeshStandardMaterial({ color: 0x9A6B3A, roughness: 0.92 })
+    );
+    const netTex = cachedItemAsset('potatoNetTex', () => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(64, 64);
+        ctx.moveTo(64, 0); ctx.lineTo(0, 64);
+        ctx.stroke();
+        const t = new THREE.CanvasTexture(c);
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(10, 6);
+        return t;
+    });
+    const net = new THREE.Mesh(
+        cachedItemAsset('potatoNetGeo', () => lumpyLathe(1.02)),
+        new THREE.MeshStandardMaterial({ color: 0xD84315, map: netTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 })
+    );
+    // Tie twist + cardboard header tag.
+    const tie = new THREE.Mesh(
+        cachedItemAsset('potatoTieGeo', () => new THREE.CylinderGeometry(0.035, 0.05, 0.06, 10)),
+        new THREE.MeshStandardMaterial({ color: 0xC62828, roughness: 0.7 })
+    );
+    tie.position.y = 0.53;
+    const tagTex = cachedItemAsset('potatoTagTex', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#D7CCC8'; ctx.fillRect(0, 0, 512, 256);
+        ctx.strokeStyle = '#5D4037'; ctx.lineWidth = 8; ctx.strokeRect(12, 12, 488, 232);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 28px serif';
+        fitText(ctx, '★ NOT RUSSET ★', 256, 50, 470);
+        ctx.fillStyle = '#4E342E'; ctx.font = 'bold 44px "Arial Black", sans-serif';
+        fitText(ctx, 'RUSSEL POTATOS', 256, 115, 470);
+        ctx.fillStyle = '#8D6E63'; ctx.font = 'bold 24px sans-serif';
+        fitText(ctx, 'GROWN BY RUSSEL • NET WT 5 LBS', 256, 175, 470);
+        ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 20px sans-serif';
+        fitText(ctx, 'RUSSEL SAYS HI', 256, 225, 470);
+        return new THREE.CanvasTexture(canvas);
+    });
+    const tag = new THREE.Mesh(
+        cachedItemAsset('potatoTagGeo', () => new THREE.PlaneGeometry(0.30, 0.15)),
+        new THREE.MeshBasicMaterial({ map: tagTex, side: THREE.DoubleSide })
+    );
+    tag.position.set(0, 0.24, 0.29);
+    tag.rotation.x = -0.18;
+    group.add(potatoes, net, tie, tag);
+    return group;
+}
+
 // Available items with more realistic representations
 const BASE_ITEMS = [
     { 
@@ -1477,67 +1656,7 @@ const BASE_ITEMS = [
         color: 0xF0F0F0, 
         size: [0.6, 0.9, 0.6],
         quantity: [1, 2],
-        model: function() {
-            const group = new THREE.Group();
-            
-            // Translucent frosted plastic gallon jug
-            const jugMat = new THREE.MeshStandardMaterial({ 
-                color: 0xF5F7FA,
-                roughness: 0.35,
-                metalness: 0.05
-            });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.58, 24), jugMat);
-            body.position.y = 0.29;
-            
-            // Tapered jug shoulder & neck
-            const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.24, 0.16, 24), jugMat);
-            shoulder.position.y = 0.66;
-
-            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.08, 24), jugMat);
-            neck.position.y = 0.76;
-            
-            // Blue Screw Cap
-            const cap = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.085, 0.085, 0.06, 20),
-                new THREE.MeshStandardMaterial({ color: 0x1976D2, roughness: 0.3 })
-            );
-            cap.position.y = 0.82;
-            
-            // Molded Ergonomic Jug Handle
-            const handleGeo = new THREE.TorusGeometry(0.14, 0.032, 10, 18, Math.PI);
-            const handle = new THREE.Mesh(handleGeo, jugMat);
-            handle.rotation.z = Math.PI / 2;
-            handle.position.set(0.24, 0.48, 0);
-            
-            // Printed Milk Brand Label on front
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 384;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 512, 384);
-            ctx.fillStyle = '#1565C0'; ctx.fillRect(10, 10, 492, 100);
-            ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 32px sans-serif';
-            ctx.textAlign = 'center'; ctx.fillText('★ GRADE B+ ★', 256, 45);
-            ctx.font = 'bold 44px "Arial Black", sans-serif';
-            fitText(ctx, 'LIZARD MILK', 256, 92, 470);
-            // Cow / pasture graphic
-            ctx.fillStyle = '#4CAF50'; ctx.beginPath(); ctx.ellipse(256, 250, 200, 70, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#1565C0'; ctx.font = 'bold 36px "Arial Black", sans-serif';
-            ctx.fillText('GRADE B+ • 1 GALLON', 256, 220);
-            ctx.fillStyle = '#D84315'; ctx.font = 'bold 24px sans-serif';
-            fitText(ctx, 'COLD-BLOODED • 3.78 L', 256, 265, 470);
-            ctx.fillStyle = '#555555'; ctx.font = 'bold 18px sans-serif';
-            fitText(ctx, 'SUN-BASKED • SCALE-FREE (MOSTLY)', 256, 350, 470);
-
-            const labelTex = new THREE.CanvasTexture(canvas);
-            const label = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.242, 0.282, 0.38, 24, 1, true, -Math.PI * 0.4, Math.PI * 0.8),
-                new THREE.MeshBasicMaterial({ map: labelTex, side: THREE.DoubleSide })
-            );
-            label.position.y = 0.32;
-            
-            group.add(body, shoulder, neck, cap, handle, label);
-            return group;
-        } 
+        model: buildMilkJugModel
     },
     { 
         name: "Bread", 
@@ -2351,66 +2470,7 @@ const BASE_ITEMS = [
         color: 0xD2B48C, 
         size: [0.75, 0.55, 0.75],
         quantity: [1, 4],
-        model: function() {
-            const group = new THREE.Group();
-            const potatoMat = new THREE.MeshStandardMaterial({ color: 0x936838, roughness: 0.9 });
-            const darkEyeMat = new THREE.MeshStandardMaterial({ color: 0x5D4037, roughness: 0.95 });
-            const sackMat = new THREE.MeshStandardMaterial({ color: 0xBCAAA4, roughness: 0.95 });
-
-            // Realistic Burlap Produce Sack Base
-            const sack = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.26, 24, 1, false), sackMat);
-            sack.position.y = 0.13;
-
-            // Burlap printed label
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 256;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#D7CCC8'; ctx.fillRect(0, 0, 512, 256);
-            ctx.strokeStyle = '#5D4037'; ctx.lineWidth = 8; ctx.strokeRect(12, 12, 488, 232);
-            ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 28px serif';
-            ctx.textAlign = 'center'; fitText(ctx, '★ NOT RUSSET ★', 256, 50, 470);
-            ctx.fillStyle = '#4E342E'; ctx.font = 'bold 44px "Arial Black", sans-serif';
-            fitText(ctx, 'RUSSEL POTATOS', 256, 115, 470);
-            ctx.fillStyle = '#8D6E63'; ctx.font = 'bold 24px sans-serif';
-            fitText(ctx, 'GROWN BY RUSSEL • NET WT 5 LBS', 256, 175, 470);
-            ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 20px sans-serif';
-            fitText(ctx, 'RUSSEL SAYS HI', 256, 225, 470);
-
-            const sackTex = new THREE.CanvasTexture(canvas);
-            const sackLabel = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.282, 0.322, 0.20, 24, 1, true, -Math.PI * 0.4, Math.PI * 0.8),
-                new THREE.MeshBasicMaterial({ map: sackTex, side: THREE.DoubleSide })
-            );
-            sackLabel.position.y = 0.13;
-
-            group.add(sack, sackLabel);
-
-            // Overflowing textured potato tubers with dimples and sprout eyes
-            const potatoPos = [
-                [-0.14, 0.26, -0.12, 1.2, 0.85, 0.95],
-                [0.14, 0.26, -0.12, 0.9, 1.2, 0.85],
-                [-0.14, 0.26, 0.12, 1.1, 0.9, 1.2],
-                [0.14, 0.26, 0.12, 1.2, 0.85, 1.0],
-                [0.0, 0.35, 0.0, 1.15, 0.9, 1.1]
-            ];
-            potatoPos.forEach(([px, py, pz, sx, sy, sz], idx) => {
-                const potato = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 14), potatoMat);
-                potato.scale.set(sx, sy, sz);
-                potato.position.set(px, py, pz);
-                potato.rotation.set(idx * 0.4, idx * 0.7, idx * 0.3);
-
-                // Natural sprout eyes
-                for (let e = 0; e < 3; e++) {
-                    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 6), darkEyeMat);
-                    const ea = e * Math.PI * 0.7;
-                    eye.position.set(px + Math.cos(ea) * 0.08, py + Math.sin(ea) * 0.06, pz + 0.07);
-                    group.add(eye);
-                }
-                group.add(potato);
-            });
-
-            return group;
-        }
+        model: buildPotatoBagModel
     },
     {
         name: "Canned Goods",
@@ -9598,7 +9658,7 @@ function createStaticItem(name, color, nominalSize, x, shelfWorldY, z, modelFunc
             const scaleH = maxAllowedH / rawH;
             const scaleD = maxAllowedD / rawD;
             const scaleW = maxAllowedW / rawW;
-            const fitScale = Math.min(1.0, scaleH, scaleD, scaleW);
+            const fitScale = Math.min(1.0, scaleH, scaleD, scaleW) * ITEM_SCALE;
 
             wrapper.scale.set(fitScale, fitScale, fitScale);
 
@@ -9616,7 +9676,7 @@ function createStaticItem(name, color, nominalSize, x, shelfWorldY, z, modelFunc
         const scaleH = maxAllowedH / nominalSize[1];
         const scaleD = maxAllowedD / nominalSize[2];
         const scaleW = maxAllowedW / nominalSize[0];
-        const fitScale = Math.min(1.0, scaleH, scaleD, scaleW);
+        const fitScale = Math.min(1.0, scaleH, scaleD, scaleW) * ITEM_SCALE;
 
         actualWidth = nominalSize[0] * fitScale;
         actualHeight = nominalSize[1] * fitScale;
@@ -13072,6 +13132,7 @@ function grabItem() {
                 if (newTpl && typeof newTpl.model === 'function') {
                     const oldMesh = heldItem.mesh;
                     const newMesh = newTpl.model();
+                    newMesh.scale.multiplyScalar(ITEM_SCALE);
                     newMesh.position.copy(oldMesh.position);
                     newMesh.quaternion.copy(oldMesh.quaternion);
                     try { newMesh.traverse(o => { if (o.isMesh && o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{ m.depthTest=true; m.depthWrite=true; }); } o.renderOrder=0; }); } catch(_) {}
@@ -13079,7 +13140,7 @@ function grabItem() {
                     scene.add(newMesh);
                     heldItem.mesh = newMesh;
                     heldItem.name = newTpl.name;
-                    heldItem.size = newTpl.size?.slice() || heldItem.size;
+                    heldItem.size = newTpl.size?.map(v => v * ITEM_SCALE) || heldItem.size;
                     heldItem.isTwoInOne = false;
                     // The appearance swap alone does not change physical mass.
                     heldItem.massOverride = baseMass;
