@@ -33,6 +33,10 @@
 }
 
 /* Buttons scale with the viewport height so they always sit under the title */
+/* Until game.js has wired the menu up, only its picture shows; then the buttons fade in */
+#main-menu { transition: opacity 0.3s ease; }
+#main-menu.booting { opacity: 0; pointer-events: none; }
+
 #main-menu {
     right: calc(1.4vmin + clamp(10px, 2.2vw, 28px));
     bottom: calc(1.4vmin + clamp(10px, 2.4vh, 28px));

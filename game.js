@@ -18684,9 +18684,8 @@ function showMainMenu() {
     // Some mobile browsers swallow the synthetic click (e.g. under an overlay
     // or after a scroll gesture); start directly from the touch as well.
     playBtn.ontouchend = onPlay;
-    // Play pressed while the game was still loading (index.html noted it): start now.
-    window.__gameReady = true;
-    if (window.__playQueued) { window.__playQueued = false; playBtn.textContent = 'Play'; onPlay(); }
+    // The buttons work now: fade them in (index.html keeps them hidden until here)
+    mainMenuElement.classList.remove('booting');
 
     document.getElementById('customize-game').onclick = () => {
         const menu = document.getElementById('customization-menu');

@@ -572,8 +572,9 @@
                 <div id="shop-grid" class="shop-grid"></div>
             </div>
         </div>
-        <!-- The main menu is part of the page, so it's on screen before the game's scripts have loaded (game.js wires it up) -->
-        <div id="main-menu">
+        <!-- The main menu is part of the page, so its picture is on screen before the game's scripts have loaded; the
+             buttons fade in once game.js has wired them up (class "booting" until then) -->
+        <div id="main-menu" class="booting">
             <button id="start-game" class="main-menu-btn">Play</button>
             <button id="customize-game" class="main-menu-btn">Customize Game</button>
             <button id="open-leaderboard" class="main-menu-btn">Leaderboard</button>
@@ -581,14 +582,6 @@
         </div>
         <div id="menu-bg"></div>
     </div>
-    <script>
-        // Play pressed before the game has loaded: remember it, and game.js starts the run as soon as it's ready.
-        document.getElementById('start-game').addEventListener('click', function () {
-            if (window.__gameReady) return;
-            window.__playQueued = true;
-            this.textContent = 'Loading...';
-        });
-    </script>
     <script type="module" src="config.js"></script>
     <script type="module" src="game.js"></script>
     <script type="module" src="src/touch-controls.js"></script>
