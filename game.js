@@ -8,6 +8,7 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
+import { createSound } from './src/audio-engine.js';
 import { createCompatibleAudio as createCompatibleAudioExt, safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
 import { addMagMartLogo3D } from './src/magmart-logo-3d.js';
@@ -4132,8 +4133,8 @@ function loadSounds() {
     if (music && music !== newMusic) retireMusic(music);
     music = registerMusic(newMusic);
     soundEffects = newSfx;
-    soundEffects.tweakerGrunt = new Audio('./sfx/tweaker_grunt.wav');
-    soundEffects.moneyPickup = new Audio('./sfx/money_pickup.wav');
+    soundEffects.tweakerGrunt = createSound('sfx/tweaker_grunt.wav');
+    soundEffects.moneyPickup = createSound('sfx/money_pickup.wav');
     Object.keys(BOOSTED_SFX_MULTIPLIERS).forEach(name => setBoostedSfxVolume(name));
     cartRollingRequested = false;
     sfxKey = singles.sfxKey;
