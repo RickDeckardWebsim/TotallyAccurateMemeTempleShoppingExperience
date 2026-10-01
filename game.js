@@ -8,7 +8,7 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createSound, setListener } from './src/audio-engine.js';
+import { createSound, setListener, loadSoundPacks, prefetchSoundFiles } from './src/audio-engine.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
 import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
@@ -293,12 +293,14 @@ function updateFrustumCulling() {
     }
 }
 
+const texturesLoading = new Map(); // key -> promise, so a texture asked for twice while loading is fetched once
 function loadTextureAsync(path, isSRGB = false, repeatX = 1, repeatY = 1) {
     const key = `${path}_${isSRGB}_${repeatX}_${repeatY}`;
     if (textureCache.has(key)) {
         return Promise.resolve(textureCache.get(key));
     }
-    return new Promise((resolve) => {
+    if (texturesLoading.has(key)) return texturesLoading.get(key);
+    const loading = new Promise((resolve) => {
         sharedTextureLoader.load(
             texturePath(path),
             (tex) => {
@@ -333,6 +335,9 @@ function loadTextureAsync(path, isSRGB = false, repeatX = 1, repeatY = 1) {
             }
         );
     });
+    texturesLoading.set(key, loading);
+    loading.then(() => texturesLoading.delete(key));
+    return loading;
 }
 
 const LOADING_HINTS = [
@@ -378,32 +383,73 @@ function hideLoadingScreen() {
     }, 320);
 }
 
+// Everything a run shows or plays from its first moment: the store's materials (the maps createPBRMaterial uses at
+// this PBR quality), the sky, the spill stains, the core sounds and the fonts. Downloaded in the background while
+// the menu is up; Play's loading screen waits for whatever hasn't arrived yet, so nothing pops in once a run starts.
+const PRELOAD_MATERIALS = [
+    { r: 14, base: 'uploads/SupermarketTile_BaseColor.png', normal: 'uploads/SupermarketTile_Normal_OpenGL.png', orm: 'uploads/SupermarketTile_ORM.png' },
+    { r: 1, base: 'uploads/VerticalPlankWall_BaseColor.png', normal: 'uploads/VerticalPlankWall_Normal_OpenGL.png', orm: 'uploads/VerticalPlankWall_ORM.png' },
+    { r: 15, base: 'uploads/DropCeiling_BaseColor.png', normal: 'uploads/DropCeiling_Normal_OpenGL.png', orm: 'uploads/DropCeiling_ORM.png' },
+    { r: 1, base: 'uploads/SupermarketBrick_BaseColor.png', normal: 'uploads/SupermarketBrick_Normal_OpenGL.png', orm: 'uploads/SupermarketBrick_ORM.png' },
+    { r: 1, base: 'uploads/Sidewalk_BaseColor_1k.jpg', normal: 'uploads/Sidewalk_Normal_OpenGL_1k.webp', rough: 'uploads/Sidewalk_Roughness_1k.jpg', metal: 'uploads/Sidewalk_Metallic_1k.png', ao: 'uploads/Sidewalk_AO_1k.png' },
+];
 async function preloadAllGameAssets(onProgress) {
-    // What the store's materials will use at this PBR quality (see createPBRMaterial): the base colour, and from
-    // medium up the normal map and the ORM map (AO/roughness/metalness in one). The sky loads in setupScene.
     const pbr = CONFIG.PBR_QUALITY || 'high';
-    const maps = pbr === 'high' || pbr === 'medium' ? ['BaseColor', 'Normal_OpenGL', 'ORM'] : ['BaseColor'];
-    const assetsToLoad = [
-        ...[['SupermarketTile', 14], ['VerticalPlankWall', 1], ['DropCeiling', 15], ['SupermarketBrick', 1]].flatMap(([name, r]) =>
-            maps.map((map) => ({ path: `uploads/${name}_${map}.png`, isSRGB: map === 'BaseColor', rx: r, ry: r }))),
-        // spill stains
-        { path: 'watercolor-abstract-background-free-png.png', isSRGB: true, rx: 1, ry: 1 },
+    const textures = [];
+    for (const m of PRELOAD_MATERIALS) {
+        const paths = [m.base];
+        if (pbr === 'high' || pbr === 'medium') paths.push(m.normal, m.orm || m.rough, m.orm || m.metal);
+        if (pbr === 'high') paths.push(m.orm || m.ao);
+        for (const path of new Set(paths)) textures.push({ path, isSRGB: path === m.base, rx: m.r, ry: m.r });
+    }
+    textures.push({ path: 'watercolor-abstract-background-free-png.png', isSRGB: true, rx: 1, ry: 1 }); // spill stains
+    textures.push({ path: 'sky_39_2k.webp', isSRGB: true, rx: 1, ry: 1 }); // (setupScene uses its picture)
+    const jobs = [
+        ...textures.map((t) => () => loadTextureAsync(t.path, t.isSRGB, t.rx, t.ry)),
+        () => loadSoundPacks(),
+        () => loadFonts(),
     ];
 
     let count = 0;
-    const total = assetsToLoad.length;
-    // Phones decode a few at a time so 2K PNGs never pile up in memory at once.
+    const total = jobs.length;
+    // Phones decode a few at a time so big images never pile up in memory at once.
     const lanes = maxTextureSize() ? 2 : total;
     let next = 0;
     const worker = async () => {
         while (next < total) {
-            const item = assetsToLoad[next++];
-            await loadTextureAsync(item.path, item.isSRGB, item.rx, item.ry);
+            await jobs[next++]();
             count++;
             if (onProgress) onProgress(count / total);
         }
     };
     await Promise.all(Array.from({ length: Math.min(lanes, total) }, worker));
+}
+
+// The handwriting and clock fonts (grocery list, timer), so they don't swap in at the start of a run. Their CSS
+// loads without holding up the menu (index.html), so wait for it first (at most 3 s).
+function loadFonts() {
+    const css = document.querySelector('link[href*="fonts.googleapis.com/css2"]');
+    const cssReady = !css || css.rel === 'stylesheet' ? Promise.resolve()
+        : new Promise((done) => { css.addEventListener('load', done); css.addEventListener('error', done); setTimeout(done, 3000); });
+    return cssReady.then(() => Promise.all(["600 20px 'Caveat'", "700 20px 'Caveat'", "20px 'Patrick Hand'", "20px 'Share Tech Mono'"]
+        .map((f) => document.fonts?.load(f)))).catch(() => {});
+}
+
+// Resolves once the menu's picture has loaded (or after 2 s), so game downloads never hold up the menu.
+function menuPictureShown() {
+    return new Promise((done) => {
+        const img = new Image();
+        img.onload = img.onerror = () => done();
+        img.src = 'menu-bg.webp';
+        setTimeout(done, 2000);
+    });
+}
+
+// After the run's own assets: what only some runs need (event sounds, the slap print), fetched quietly so it's
+// already here when it happens.
+function prefetchExtras() {
+    prefetchSoundFiles();
+    new Image().src = 'uploads/webp/leslap_256.webp';
 }
 let world, timeStep = 1/60;
 let physicsMaterials = null;
@@ -3988,15 +4034,8 @@ function updateControlsGuideDisplay() {
 }
 updateControlsGuideDisplay();
 
-const mainMenuElement = document.createElement('div');
-mainMenuElement.id = 'main-menu';
-mainMenuElement.innerHTML = `
-    <button id="start-game" class="main-menu-btn">Play</button>
-    <button id="customize-game" class="main-menu-btn">Customize Game</button>
-    <button id="open-leaderboard" class="main-menu-btn">Leaderboard</button>
-    <button id="open-settings" class="main-menu-btn">Settings</button>
-`;
-document.getElementById('game-container').appendChild(mainMenuElement);
+// (the main menu and its picture are in index.html, so they show before this script has loaded)
+const mainMenuElement = document.getElementById('main-menu');
 
 // Add mute toggle button on main menu (audio symbol)
 const muteBtn = document.createElement('button');
@@ -4031,10 +4070,8 @@ document.addEventListener('click', (event) => {
     if (button && !button.disabled) playUIButtonSound('uiClick');
 }, true);
 
-// Add still image background for main menu
-const menuBg = document.createElement('div');
-menuBg.id = 'menu-bg';
-document.getElementById('game-container').appendChild(menuBg);
+// Still image background for main menu
+const menuBg = document.getElementById('menu-bg');
 
 const itemHoverTextElement = document.getElementById('item-hover-text');
 
@@ -4334,7 +4371,9 @@ function installIndoorDimming(r) {
 }
 
 function setupScene() {
-    const { scene: newScene, camera: newCamera, renderer: newRenderer, skyTexture: skyTex, nightSkyTexture: nightSkyTex, lights } = setupSceneExt(CONFIG);
+    let skyImage = textureCache.get('sky_39_2k.webp_true_1_1')?.image; // (preloaded while the menu was up)
+    if (!(skyImage?.width > 4)) skyImage = null; // (not the grey stand-in from a failed load: let setupScene try again)
+    const { scene: newScene, camera: newCamera, renderer: newRenderer, skyTexture: skyTex, nightSkyTexture: nightSkyTex, lights } = setupSceneExt(CONFIG, skyImage);
     scene = newScene;
     camera = newCamera;
     renderer = newRenderer;
@@ -18613,6 +18652,9 @@ function showMainMenu() {
     // Some mobile browsers swallow the synthetic click (e.g. under an overlay
     // or after a scroll gesture); start directly from the touch as well.
     playBtn.ontouchend = onPlay;
+    // Play pressed while the game was still loading (index.html noted it): start now.
+    window.__gameReady = true;
+    if (window.__playQueued) { window.__playQueued = false; playBtn.textContent = 'Play'; onPlay(); }
 
     document.getElementById('customize-game').onclick = () => {
         const menu = document.getElementById('customization-menu');
@@ -18802,8 +18844,8 @@ async function startNewGameInner() {
     // Roll powerup for this game before starting gameplay
     rollPowerup();
 
-    // Small delay to ensure rendering pipeline is completely stable before revealing
-    await new Promise(resolve => setTimeout(resolve, 150));
+    // Let the warm-up frame reach the screen before revealing (one frame, not a fixed wait)
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
 
     // 5. Hide loading screen smoothly
     hideLoadingScreen();
@@ -19445,8 +19487,12 @@ function init() {
     updateScoreboard();
     loadingElement.style.display = 'none';
 
-    // Begin background pre-streaming textures while player is in menu
-    preloadAllGameAssets().catch(e => console.warn('Background texture pre-stream:', e));
+    // Menu first: once the menu and its picture are on screen, download what a run needs (textures, sky, core
+    // sounds, fonts; Play waits for these), then quietly the extras (event sounds...), so nothing loads mid-run.
+    menuPictureShown()
+        .then(() => preloadAllGameAssets())
+        .catch(e => console.warn('Background pre-stream:', e))
+        .then(prefetchExtras);
 
     // Ensure alert overlay exists at boot
     if (!centerAlertElement) {

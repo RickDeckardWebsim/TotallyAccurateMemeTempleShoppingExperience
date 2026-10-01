@@ -5,8 +5,9 @@
 // that plays sounds doesn't change. What's different underneath:
 //  - Sounds are played from small MP3s that tools/pack-sfx.mjs builds from the original files (src/sfx-pack.js
 //    says which file and where in it). The sounds a normal run uses share one, sfx/pack.mp3, fetched and
-//    decoded as the page loads; each event sound (nuke, side quests, freezer...) has its own in sfx/packed/,
-//    decoded the first time it plays, so memory only goes to what a run uses. The same sound can overlap
+//    decoded once the menu is up (loadSoundPacks); each event sound (nuke, side quests, freezer...) has its own
+//    in sfx/packed/, downloaded after that (prefetchSoundFiles) but decoded only the first time it plays, so
+//    memory only goes to what a run uses. The same sound can overlap
 //    itself (cloneNode is cheap), loops loop without a gap, and a sound that isn't listed (new, say) loads
 //    and decodes its own file on its first play.
 //  - Music and other long MP3s ({stream: true}) stream from an <audio> element, routed through a gain node,
@@ -46,9 +47,9 @@ if (ctx) {
 const decoded = new Map();
 function decode(src) {
     if (!decoded.has(src)) {
-        const p = fetch(src)
-            .then(r => { if (!r.ok) throw new Error(`${r.status} ${src}`); return r.arrayBuffer(); })
-            .then(b => new Promise((ok, fail) => ctx.decodeAudioData(b, ok, fail)));
+        const bytes = fetched.get(src) || fetch(src).then(r => { if (!r.ok) throw new Error(`${r.status} ${src}`); return r.arrayBuffer(); });
+        fetched.delete(src); // (decoding takes the bytes over)
+        const p = bytes.then(b => new Promise((ok, fail) => ctx.decodeAudioData(b, ok, fail)));
         p.catch(() => decoded.delete(src)); // a failed load can be tried again later
         decoded.set(src, p);
     }
@@ -68,7 +69,23 @@ function loadPack(file) {
     }));
     return packs.get(file);
 }
-if (ctx) for (const f of SFX_PACK?.load || []) loadPack(f).catch(() => {});
+/** Fetch and decode the sounds every run uses (sfx/pack.mp3). Resolves when they're ready to play. */
+export function loadSoundPacks() {
+    return ctx ? Promise.all((SFX_PACK?.load || []).map((f) => loadPack(f))).then(() => {}, () => {}) : Promise.resolve();
+}
+// Event sounds' files, fetched ahead (prefetchSoundFiles) and decoded on their first play.
+const fetched = new Map();
+/** Quietly download every other sound file now, so an event's sound never waits on the network mid-run. */
+export function prefetchSoundFiles() {
+    if (!ctx) return;
+    const files = new Set(Object.values(SFX_PACK?.sounds || {}).map((v) => v[0]));
+    for (const f of files) {
+        if ((SFX_PACK.load || []).includes(f) || fetched.has(f) || decoded.has(f)) continue;
+        const p = fetch(f, { priority: 'low' }).then((r) => { if (!r.ok) throw new Error(`${r.status} ${f}`); return r.arrayBuffer(); });
+        p.catch(() => fetched.delete(f));
+        fetched.set(f, p);
+    }
+}
 /** Is this file in the pack (played from memory) rather than a file of its own? */
 export function isPacked(src) { return packed.has(href(src)); }
 // Where a sound's audio is: {b: buffer, start, dur} (a stretch of the pack, or all of its own file)
