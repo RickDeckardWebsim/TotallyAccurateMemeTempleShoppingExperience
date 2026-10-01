@@ -98,8 +98,24 @@ function shrinkTexture(tex) {
     } catch (_) {}
     return tex;
 }
+// Textures that have smaller WebP copies in uploads/webp/ (<name>_<size>.webp, made from the PNG with cwebp; the
+// PNGs stay as the originals): the sizes there, largest first. Desktop loads the largest, phones the largest
+// that fits maxTextureSize(), so nobody downloads a 2K PNG only to shrink it.
+const WEBP_TEXTURES = {};
+for (const [name, sizes] of [['SupermarketTile', [2048, 1024, 512, 256]], ['VerticalPlankWall', [1024, 512, 256]],
+    ['DropCeiling', [1024, 512, 256]], ['SupermarketBrick', [1024, 512, 256]]]) {
+    for (const map of ['BaseColor', 'Normal_OpenGL', 'ORM']) WEBP_TEXTURES[`uploads/${name}_${map}.png`] = sizes;
+}
+WEBP_TEXTURES['watercolor-abstract-background-free-png.png'] = [512, 256];
+function texturePath(path) {
+    const sizes = WEBP_TEXTURES[path];
+    if (!sizes) return path;
+    const max = maxTextureSize() || Infinity;
+    const size = sizes.find((s) => s <= max) ?? sizes[sizes.length - 1];
+    return `uploads/webp/${path.split('/').pop().replace(/\.png$/, '')}_${size}.webp`;
+}
 function loadShrunk(path) {
-    return sharedTextureLoader.load(path, (t) => shrinkTexture(t));
+    return sharedTextureLoader.load(texturePath(path), (t) => shrinkTexture(t));
 }
 
 // Game state
@@ -150,9 +166,10 @@ function createPBRMaterial(params) {
     const {
         baseColorPath,
         normalPath,
-        roughnessPath,
-        metallicPath,
-        aoPath,
+        ormPath, // one texture holding AO (red), roughness (green) and metalness (blue): stands in for the three below
+        roughnessPath = ormPath,
+        metallicPath = ormPath,
+        aoPath = ormPath,
         heightPath,
         repeatX = 1,
         repeatY = 1,
@@ -283,7 +300,7 @@ function loadTextureAsync(path, isSRGB = false, repeatX = 1, repeatY = 1) {
     }
     return new Promise((resolve) => {
         sharedTextureLoader.load(
-            path,
+            texturePath(path),
             (tex) => {
                 shrinkTexture(tex);
                 tex.wrapS = THREE.RepeatWrapping;
@@ -362,41 +379,14 @@ function hideLoadingScreen() {
 }
 
 async function preloadAllGameAssets(onProgress) {
+    // What the store's materials will use at this PBR quality (see createPBRMaterial): the base colour, and from
+    // medium up the normal map and the ORM map (AO/roughness/metalness in one). The sky loads in setupScene.
+    const pbr = CONFIG.PBR_QUALITY || 'high';
+    const maps = pbr === 'high' || pbr === 'medium' ? ['BaseColor', 'Normal_OpenGL', 'ORM'] : ['BaseColor'];
     const assetsToLoad = [
-        // Floor PBR (SupermarketTile)
-        { path: 'uploads/SupermarketTile_BaseColor.png', isSRGB: true, rx: 14, ry: 14 },
-        { path: 'uploads/SupermarketTile_Normal_OpenGL.png', isSRGB: false, rx: 14, ry: 14 },
-        { path: 'uploads/SupermarketTile_Roughness.png', isSRGB: false, rx: 14, ry: 14 },
-        { path: 'uploads/SupermarketTile_Metallic.png', isSRGB: false, rx: 14, ry: 14 },
-        { path: 'uploads/SupermarketTile_AO.png', isSRGB: false, rx: 14, ry: 14 },
-        { path: 'uploads/SupermarketTile_Height.png', isSRGB: false, rx: 14, ry: 14 },
-
-        // Wall PBR (VerticalPlankWall)
-        { path: 'uploads/VerticalPlankWall_BaseColor.png', isSRGB: true, rx: 1, ry: 1 },
-        { path: 'uploads/VerticalPlankWall_Normal_OpenGL.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/VerticalPlankWall_Roughness.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/VerticalPlankWall_Metallic.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/VerticalPlankWall_AO.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/VerticalPlankWall_Height.png', isSRGB: false, rx: 1, ry: 1 },
-
-        // Roof / Ceiling PBR (DropCeiling)
-        { path: 'uploads/DropCeiling_BaseColor.png', isSRGB: true, rx: 15, ry: 15 },
-        { path: 'uploads/DropCeiling_Normal_OpenGL.png', isSRGB: false, rx: 15, ry: 15 },
-        { path: 'uploads/DropCeiling_Roughness.png', isSRGB: false, rx: 15, ry: 15 },
-        { path: 'uploads/DropCeiling_Metallic.png', isSRGB: false, rx: 15, ry: 15 },
-        { path: 'uploads/DropCeiling_AO.png', isSRGB: false, rx: 15, ry: 15 },
-        { path: 'uploads/DropCeiling_Height.png', isSRGB: false, rx: 15, ry: 15 },
-
-        // Outside Wall PBR (SupermarketBrick)
-        { path: 'uploads/SupermarketBrick_BaseColor.png', isSRGB: true, rx: 1, ry: 1 },
-        { path: 'uploads/SupermarketBrick_Normal_OpenGL.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/SupermarketBrick_Roughness.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/SupermarketBrick_Metallic.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/SupermarketBrick_AO.png', isSRGB: false, rx: 1, ry: 1 },
-        { path: 'uploads/SupermarketBrick_Height.png', isSRGB: false, rx: 1, ry: 1 },
-
-        // Environment skybox & spill textures
-        { path: 'sky_39_2k.png', isSRGB: true, rx: 1, ry: 1 },
+        ...[['SupermarketTile', 14], ['VerticalPlankWall', 1], ['DropCeiling', 15], ['SupermarketBrick', 1]].flatMap(([name, r]) =>
+            maps.map((map) => ({ path: `uploads/${name}_${map}.png`, isSRGB: map === 'BaseColor', rx: r, ry: r }))),
+        // spill stains
         { path: 'watercolor-abstract-background-free-png.png', isSRGB: true, rx: 1, ry: 1 },
     ];
 
@@ -4590,10 +4580,7 @@ function createStoreLayout() {
     const floorMaterial = createPBRMaterial({
         baseColorPath: 'uploads/SupermarketTile_BaseColor.png',
         normalPath: 'uploads/SupermarketTile_Normal_OpenGL.png',
-        roughnessPath: 'uploads/SupermarketTile_Roughness.png',
-        metallicPath: 'uploads/SupermarketTile_Metallic.png',
-        aoPath: 'uploads/SupermarketTile_AO.png',
-        heightPath: 'uploads/SupermarketTile_Height.png',
+        ormPath: 'uploads/SupermarketTile_ORM.png',
         repeatX: 14,
         repeatY: 14,
         defaultRoughness: 0.38,
@@ -4624,10 +4611,7 @@ function createStoreLayout() {
     const ceilingMaterial = createPBRMaterial({
         baseColorPath: 'uploads/DropCeiling_BaseColor.png',
         normalPath: 'uploads/DropCeiling_Normal_OpenGL.png',
-        roughnessPath: 'uploads/DropCeiling_Roughness.png',
-        metallicPath: 'uploads/DropCeiling_Metallic.png',
-        aoPath: 'uploads/DropCeiling_AO.png',
-        heightPath: 'uploads/DropCeiling_Height.png',
+        ormPath: 'uploads/DropCeiling_ORM.png',
         repeatX: 15,
         repeatY: 15,
         defaultRoughness: 0.65,
@@ -6898,10 +6882,7 @@ function createWalls() {
     const insideWallMat = createPBRMaterial({
         baseColorPath: 'uploads/VerticalPlankWall_BaseColor.png',
         normalPath: 'uploads/VerticalPlankWall_Normal_OpenGL.png',
-        roughnessPath: 'uploads/VerticalPlankWall_Roughness.png',
-        metallicPath: 'uploads/VerticalPlankWall_Metallic.png',
-        aoPath: 'uploads/VerticalPlankWall_AO.png',
-        heightPath: 'uploads/VerticalPlankWall_Height.png',
+        ormPath: 'uploads/VerticalPlankWall_ORM.png',
         repeatX: wallRepeatX,
         repeatY: wallRepeatY,
         defaultRoughness: 0.38,
@@ -6917,10 +6898,7 @@ function createWalls() {
     const outsideWallMat = createPBRMaterial({
         baseColorPath: 'uploads/SupermarketBrick_BaseColor.png',
         normalPath: 'uploads/SupermarketBrick_Normal_OpenGL.png',
-        roughnessPath: 'uploads/SupermarketBrick_Roughness.png',
-        metallicPath: 'uploads/SupermarketBrick_Metallic.png',
-        aoPath: 'uploads/SupermarketBrick_AO.png',
-        heightPath: 'uploads/SupermarketBrick_Height.png',
+        ormPath: 'uploads/SupermarketBrick_ORM.png',
         repeatX: outsideWallRepeatX,
         repeatY: outsideWallRepeatY,
         defaultRoughness: 0.65,
@@ -8830,7 +8808,7 @@ function updateLeaderboardModalContent() {
                         <td><span class="rank-badge ${rankClass}">${rankLabel}</span></td>
                         <td>
                             <div class="player-cell">
-                                <img class="player-avatar-small" src="${avatarUrl}" alt="${entry.username}" onerror="this.src='watercolor-abstract-background-free-png.png';">
+                                <img class="player-avatar-small" src="${avatarUrl}" alt="${entry.username}" onerror="this.src='uploads/webp/watercolor-abstract-background-free-png_256.webp';">
                                 <span style="font-weight: 700; color: #fff;">${entry.username || 'Shopper'}</span>
                             </div>
                         </td>
@@ -16904,7 +16882,7 @@ function makeCustomerFlee(cust, ms = 2500) {
 
 function getCustomerSlapTexture() {
     if (!customerSlapTexture) {
-        customerSlapTexture = sharedTextureLoader.load('uploads/leslap.png');
+        customerSlapTexture = sharedTextureLoader.load('uploads/webp/leslap_256.webp');
         customerSlapTexture.colorSpace = THREE.SRGBColorSpace;
     }
     return customerSlapTexture;

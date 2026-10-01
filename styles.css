@@ -1196,7 +1196,7 @@ button:hover {
 #menu-bg {
     position: absolute;
     inset: 0;
-    background-image: url("menu-bg.png");
+    background-image: url("menu-bg.webp");
     background-size: cover;
     background-position: center center;
     filter: saturate(0.85) contrast(1.02) brightness(0.96);
