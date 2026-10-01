@@ -3,13 +3,14 @@
 // createSound(src) returns an object that answers the same calls the game already makes on an
 // <audio> element (play, pause, currentTime, volume, loop, muted, paused, cloneNode), so code
 // that plays sounds doesn't change. What's different underneath:
-//  - The short sounds a normal run uses live in one file, sfx/pack.mp3 (tools/pack-sfx.mjs builds it;
-//    src/sfx-pack.js says where each sound is in it). It's fetched and decoded once, as the page loads;
-//    each sound plays its stretch of it. The same sound can overlap itself (cloneNode is cheap), and
-//    starting one has no network or decode delay. Any other short sound (rare events, or one not packed
-//    yet) loads and decodes its own file on its first play, so memory only goes to what a run uses.
-//  - Long sounds ({stream: true}: music, drones, ambience, sirens) still stream from an <audio>
-//    element, but routed through a gain node, so they don't sit decoded in memory.
+//  - Sounds are played from small MP3s that tools/pack-sfx.mjs builds from the original files (src/sfx-pack.js
+//    says which file and where in it). The sounds a normal run uses share one, sfx/pack.mp3, fetched and
+//    decoded as the page loads; each event sound (nuke, side quests, freezer...) has its own in sfx/packed/,
+//    decoded the first time it plays, so memory only goes to what a run uses. The same sound can overlap
+//    itself (cloneNode is cheap), loops loop without a gap, and a sound that isn't listed (new, say) loads
+//    and decodes its own file on its first play.
+//  - Music and other long MP3s ({stream: true}) stream from an <audio> element, routed through a gain node,
+//    so they don't sit decoded in memory.
 //  - Volume is a gain node in both cases. iPhones ignore <audio>.volume entirely (every sound
 //    plays at full level there, fades and distance included); a gain node works everywhere.
 //  - Two pools: plain sounds (UI, the player's own) and spatial ones ({spatial: true}), which sit at a
@@ -54,19 +55,20 @@ function decode(src) {
     return decoded.get(src);
 }
 const href = (src) => { try { return new URL(src, document.baseURI).href; } catch (_) { return src; } };
-// The pack: {src, mark, sounds: {path: [start, duration]}} in seconds. Decoders may shift the whole file
-// by a few ms (MP3 start padding, which browsers trim differently), so the pack starts with a click at
-// `mark` seconds; where it's found in the decoded audio says how far everything moved.
+// The packs: {mark, load, sounds: {name: [file, start, duration]}} (seconds). Decoders may shift a whole file by
+// a few ms (MP3 start padding, which browsers trim differently), so each file starts with a click at `mark`
+// seconds; where it's found in the decoded audio says how far everything in it moved.
 const packed = new Map(Object.entries(SFX_PACK?.sounds || {}).map(([k, v]) => [href(k), v]));
-let pack = null;
-function loadPack() {
-    return pack ||= decode(SFX_PACK.src).then(b => {
+const packs = new Map();
+function loadPack(file) {
+    if (!packs.has(file)) packs.set(file, decode(file).then(b => {
         const x = b.getChannelData(0), end = Math.min(x.length, b.sampleRate);
         let i = 0; while (i < end && Math.abs(x[i]) < 0.3) i++;
         return { b, shift: i < end ? i / b.sampleRate - SFX_PACK.mark : 0 };
-    });
+    }));
+    return packs.get(file);
 }
-if (ctx && packed.size) loadPack().catch(() => {});
+if (ctx) for (const f of SFX_PACK?.load || []) loadPack(f).catch(() => {});
 /** Is this file in the pack (played from memory) rather than a file of its own? */
 export function isPacked(src) { return packed.has(href(src)); }
 // Where a sound's audio is: {b: buffer, start, dur} (a stretch of the pack, or all of its own file)
@@ -74,7 +76,7 @@ const segments = new Map();
 function segmentFor(src) {
     if (!segments.has(src)) {
         const at = packed.get(href(src));
-        const p = at ? loadPack().then(({ b, shift }) => ({ b, start: Math.max(0, at[0] + shift), dur: at[1] }))
+        const p = at ? loadPack(at[0]).then(({ b, shift }) => ({ b, start: Math.max(0, at[1] + shift), dur: at[2] }))
             : decode(src).then(b => ({ b, start: 0, dur: b.duration }));
         p.catch(() => segments.delete(src));
         segments.set(src, p);
@@ -115,7 +117,7 @@ class BufferSound {
         this._duration = NaN;
         this._rate = 1;
         this._want = 0;       // play() calls waiting for the decode (a pause() in between cancels them)
-        // (a packed sound is decoded with the pack, at page load; any other on its first play)
+        // (a sound in sfx/pack.mp3 is decoded with it, at page load; any other on its first play)
     }
     get duration() { return this._duration; }
     /** Playback speed (1 = as recorded; higher is faster and higher-pitched); glides on a playing voice. */

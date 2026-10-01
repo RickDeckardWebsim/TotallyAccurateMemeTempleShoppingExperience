@@ -3,14 +3,15 @@
 //    <audio> element: play(), pause(), volume, loop, currentTime, cloneNode(). Keep it in soundEffects and set
 //    its volume from CONFIG.SFX_VOLUME, like the others, so the settings slider reaches it.
 //  - The same sound overlapping itself (rapid hits): play sound.cloneNode() instead of the sound.
-//  - Long files (music, ambience; over ~15 s): createSound(src, { stream: true, loop: true }), so they stream
+//  - Long files (music, ambience; over ~15 s): createSound(src, { stream: true, loop: true }), so an MP3 streams
 //    instead of sitting in memory. Music also goes through registerMusic() in game.js (the mute button).
 //  - A sound somewhere in the world: createSound(src, { spatial: true, position: { x, y, z } }): quieter with
 //    distance and panned left/right from the camera. setPosition(x, y, z) moves it.
 //  - volume above 1 boosts it (the engine's limiter keeps it from clipping).
-//  - sfx/pack.mp3 holds the sounds every run uses, loaded at start (list: src/sfx-pack.js). A new sound needn't be
-//    in it. If you replace the audio of a file listed there, rebuild the pack (cd tools && npm i && node
-//    pack-sfx.mjs) or delete that file's line in src/sfx-pack.js.
+//  - WAVs aren't downloaded as they are: tools/pack-sfx.mjs makes small MP3s from them (sfx/pack.mp3 for what every
+//    run uses, sfx/packed/ for the rest; list: src/sfx-pack.js), and the code keeps using the WAV's name. A new
+//    sound works straight away (its own file loads); run the tool to shrink it. If you replace the audio of a file
+//    listed there, run the tool again (cd tools && npm i && node pack-sfx.mjs) or delete its line in src/sfx-pack.js.
 //  - Sounds picked on the soundboard (cart, doors, footsteps, item drops): src/sound-picks.js.
 import { CONFIG } from '../config.js';
 import { createSound } from './audio-engine.js';
