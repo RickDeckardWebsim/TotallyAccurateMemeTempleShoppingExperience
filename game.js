@@ -10754,10 +10754,12 @@ CartPhys.initCartPhysics({
         if (fromScuffle) displayMessage(`💥 A flying ${item.name} landed in your cart!`, 2400, true);
     },
     onBump: (strength) => {
+        // the picked bump (SOUND_PICKS 'cart-bump'), else the old thud; harder hits are louder
         try {
-            if (!soundEffects.cartAdd) return;
-            const bump = soundEffects.cartAdd.cloneNode();
-            bump.volume = Math.min(1, soundEffects.cartAdd.volume * (0.35 + 0.65 * strength));
+            const base = soundEffects.cartBump || soundEffects.cartAdd;
+            if (!base) return;
+            const bump = base.cloneNode();
+            bump.volume = Math.min(1, base.volume * (0.35 + 0.65 * strength));
             bump.play().catch(() => {});
         } catch (_) {}
     },

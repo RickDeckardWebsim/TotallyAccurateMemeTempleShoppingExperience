@@ -148,5 +148,9 @@ export const SOUND_PICKS = {
  "npc-cart-roll": {
   "src": "sfx/npc_cart_roll.wav",
   "take": "roll-indoor/el-roll-indoor-rattle"
+ },
+ "cart-bump": {
+  "src": "sfx/cart_bump.mp3",
+  "take": "bump/el-bump-light"
  }
 };
