@@ -136,7 +136,8 @@ export function setupScene(CONFIG) {
   scene.add(camera);
 
   const quality = (CONFIG.RENDER_QUALITY || 'medium');
-  const aa = quality === 'high' || quality === 'ultra';
+  // MSAA (Settings > Anti-aliasing, on unless turned off; never on phones, where its framebuffer costs too much memory)
+  const aa = CONFIG.ANTIALIAS !== 'off';
   const pPref = quality === 'low' ? 'low-power' : 'high-performance';
   const lowMem = typeof window.__lowMem === 'function' && window.__lowMem();
   const renderer = new THREE.WebGLRenderer({ 
