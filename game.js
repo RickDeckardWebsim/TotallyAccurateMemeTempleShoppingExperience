@@ -19,6 +19,7 @@ import { bankSavings, pickCustomerSkin, equippedCartSkin } from './src/shop.js';
 import { applyCartFinish, applyCartSkin } from './src/cart-skins.js';
 import { buildCartQuarterSlot } from './src/cart-quarter-slot.js';
 import * as CartPhys from './src/cart-physics.js';
+import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -1649,6 +1650,91 @@ function buildPotatoBagModel() {
     return group;
 }
 
+function buildSlicedBreadModel() {
+    const group = new THREE.Group();
+    const sliceGeometry = cachedItemAsset('breadSliceGeo', () => {
+        // Nine-point loaf profile: flat base, rounded shoulders, no bevels.
+        const shape = new THREE.Shape();
+        shape.moveTo(-0.175, 0.012);
+        shape.lineTo(0.175, 0.012);
+        shape.lineTo(0.175, 0.18);
+        shape.lineTo(0.15, 0.24);
+        shape.lineTo(0.09, 0.285);
+        shape.lineTo(0, 0.30);
+        shape.lineTo(-0.09, 0.285);
+        shape.lineTo(-0.15, 0.24);
+        shape.lineTo(-0.175, 0.18);
+        shape.closePath();
+        const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.056, steps: 1, bevelEnabled: false });
+        geometry.rotateY(Math.PI / 2);
+        geometry.translate(-0.028, 0, 0);
+        return geometry;
+    });
+    const sliceMaterials = cachedItemAsset('breadSliceMaterials', () => [
+        new THREE.MeshStandardMaterial({ color: 0xFFF1D4, roughness: 0.88 }),
+        new THREE.MeshStandardMaterial({ color: 0xC68A3A, roughness: 0.75 })
+    ]);
+    // Two instanced draws (crumb faces + crust), not a separate mesh per slice.
+    const slices = new THREE.InstancedMesh(sliceGeometry, sliceMaterials, 10);
+    const matrix = new THREE.Matrix4();
+    for (let i = 0; i < 10; i++) {
+        matrix.makeTranslation(-0.279 + i * 0.062, 0, 0);
+        slices.setMatrixAt(i, matrix);
+    }
+    slices.instanceMatrix.needsUpdate = true;
+    slices.computeBoundingBox();
+    slices.computeBoundingSphere();
+    group.add(slices);
+
+    const bagGeometry = cachedItemAsset('breadBagGeo', () => {
+        const rings = [
+            [-0.335, 0.185, 0.21], [-0.32, 0.185, 0.21],
+            [0.325, 0.185, 0.21], [0.39, 0.025, 0.03], [0.445, 0.065, 0.085]
+        ].map(([y, hx, hz]) => ({ y, hx, hz, n: 6, cx: 0, cz: 0 }));
+        const geometry = loftRingsGeometry(rings, 12);
+        geometry.rotateZ(-Math.PI / 2);
+        geometry.translate(0, 0.17, 0);
+        return geometry;
+    });
+    const bagMaterial = cachedItemAsset('breadBagMaterial', () => new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF, roughness: 0.16, transparent: true, opacity: 0.16, depthWrite: false
+    }));
+    group.add(new THREE.Mesh(bagGeometry, bagMaterial));
+
+    const labelTexture = cachedItemAsset('breadLabelTex', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0D47A1'; ctx.fillRect(0, 0, 512, 256);
+        ctx.fillStyle = '#FFF9C4'; ctx.fillRect(16, 16, 480, 224);
+        ctx.fillStyle = '#B71C1C'; ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center'; fitText(ctx, '★ BEIGE-ADJACENT BAKERY ★', 256, 46, 460);
+        ctx.fillStyle = '#0D47A1'; ctx.font = 'bold 34px "Arial Black", sans-serif';
+        fitText(ctx, 'SOMEWHAT', 256, 88, 460);
+        fitText(ctx, 'WHITE BREAD', 256, 128, 460);
+        ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 22px sans-serif';
+        fitText(ctx, 'SLICED LOAF', 256, 168, 460);
+        ctx.fillStyle = '#555555'; ctx.font = 'bold 18px sans-serif';
+        fitText(ctx, 'SOFT-ISH & FRESH-ISH • NET WT 20 OZ-ISH', 256, 215, 460);
+        return new THREE.CanvasTexture(canvas);
+    });
+    const label = new THREE.Mesh(
+        cachedItemAsset('breadLabelGeo', () => new THREE.PlaneGeometry(0.30, 0.20)),
+        cachedItemAsset('breadLabelMaterial', () => new THREE.MeshStandardMaterial({ map: labelTexture, roughness: 0.4 }))
+    );
+    label.rotation.x = -Math.PI / 2;
+    label.position.set(-0.06, 0.357, 0);
+    group.add(label);
+
+    const clip = new THREE.Mesh(
+        cachedItemAsset('breadClipGeo', () => new THREE.BoxGeometry(0.018, 0.06, 0.07)),
+        cachedItemAsset('breadClipMaterial', () => new THREE.MeshStandardMaterial({ color: 0x1E88E5, roughness: 0.5 }))
+    );
+    clip.position.set(0.39, 0.17, 0);
+    group.add(clip);
+    return group;
+}
+
 // Available items with more realistic representations
 const BASE_ITEMS = [
     { 
@@ -1663,63 +1749,7 @@ const BASE_ITEMS = [
         color: 0xD2B48C, 
         size: [0.8, 0.35, 0.5],
         quantity: [1, 3],
-        model: function() {
-            const group = new THREE.Group();
-            const crustMat = new THREE.MeshStandardMaterial({ color: 0xC68A3A, roughness: 0.65 });
-            const topMat = new THREE.MeshStandardMaterial({ color: 0xE4BA76, roughness: 0.6 });
-            const whiteMat = new THREE.MeshStandardMaterial({ color: 0xFFF8E7, roughness: 0.8 });
-            const bagMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.2, transparent: true, opacity: 0.25 });
-            const clipMat = new THREE.MeshStandardMaterial({ color: 0x1E88E5, roughness: 0.4 });
-
-            // Loaf base
-            const loaf = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.22, 0.40), crustMat);
-            loaf.position.y = 0.11;
-
-            // Rounded dome top
-            const dome = new THREE.Mesh(new THREE.SphereGeometry(0.18, 20, 14), topMat);
-            dome.scale.set(1.9, 0.7, 1.1);
-            dome.position.set(0, 0.22, 0);
-
-            // Slices simulation on exposed ends
-            const sliceEnd = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.22), whiteMat);
-            sliceEnd.rotation.y = Math.PI / 2;
-            sliceEnd.position.set(0.341, 0.12, 0);
-
-            // Printed Bag Wrapper
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 256;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#0D47A1'; ctx.fillRect(0, 0, 512, 256);
-            ctx.fillStyle = '#FFF9C4'; ctx.fillRect(16, 16, 480, 224);
-            ctx.fillStyle = '#B71C1C'; ctx.font = 'bold 24px sans-serif';
-            ctx.textAlign = 'center'; fitText(ctx, '★ BEIGE-ADJACENT BAKERY ★', 256, 46, 460);
-            ctx.fillStyle = '#0D47A1'; ctx.font = 'bold 34px "Arial Black", sans-serif';
-            fitText(ctx, 'SOMEWHAT', 256, 88, 460);
-            ctx.font = 'bold 34px "Arial Black", sans-serif';
-            fitText(ctx, 'WHITE BREAD', 256, 128, 460);
-            ctx.fillStyle = '#2E7D32'; ctx.font = 'bold 22px sans-serif';
-            fitText(ctx, 'MOSTLY SLICED LOAF', 256, 168, 460);
-            ctx.fillStyle = '#555555'; ctx.font = 'bold 18px sans-serif';
-            fitText(ctx, 'SOFT-ISH & FRESH-ISH • NET WT 20 OZ-ISH', 256, 215, 460);
-
-            const bagTex = new THREE.CanvasTexture(canvas);
-            const bagLabel = new THREE.Mesh(
-                new THREE.BoxGeometry(0.52, 0.24, 0.42),
-                new THREE.MeshStandardMaterial({ map: bagTex, roughness: 0.35 })
-            );
-            bagLabel.position.set(-0.04, 0.14, 0);
-
-            // Clear plastic gathered bag tail & clip
-            const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.18, 12), bagMat);
-            tail.rotation.z = -Math.PI / 2;
-            tail.position.set(0.42, 0.14, 0);
-
-            const clip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.08), clipMat);
-            clip.position.set(0.38, 0.14, 0);
-
-            group.add(loaf, dome, sliceEnd, bagLabel, tail, clip);
-            return group;
-        }
+        model: buildSlicedBreadModel
     },
     { 
         name: "Eggs", 
@@ -2406,33 +2436,33 @@ const BASE_ITEMS = [
             const group = new THREE.Group();
             // Black butcher styrofoam meat tray
             const trayMat = new THREE.MeshStandardMaterial({ color: 0x1E2228, roughness: 0.6 });
-            const tray = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.04, 0.46), trayMat);
+            const tray = new THREE.Mesh(cachedItemAsset('chickenTrayGeo', () => new THREE.BoxGeometry(0.62, 0.04, 0.46)), trayMat);
             tray.position.y = 0.02;
 
             // Golden Seasoned Whole Roast Chicken Body
             const roastMat = new THREE.MeshStandardMaterial({ color: 0xD78B38, roughness: 0.65, metalness: 0.05 });
-            const chickenBody = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), roastMat);
-            chickenBody.scale.set(1.3, 0.85, 1.0);
-            chickenBody.position.set(0, 0.16, 0);
+            const chickenBody = new THREE.Mesh(cachedItemAsset('chickenBodyGeo', () => new THREE.SphereGeometry(0.18, 16, 12)), roastMat);
+            chickenBody.scale.set(1.3, 0.72, 1.0);
+            chickenBody.position.set(-0.025, 0.172, 0);
 
             // Drumstick legs with white bone tips
             const boneMat = new THREE.MeshStandardMaterial({ color: 0xFFFDF0, roughness: 0.4 });
-            [-0.14, 0.14].forEach((lx) => {
-                const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.028, 0.18, 12), roastMat);
-                leg.position.set(lx, 0.14, 0.14);
-                leg.rotation.x = Math.PI / 3;
-                leg.rotation.z = lx > 0 ? -0.2 : 0.2;
+            // Both legs point toward +X, the tray's short edge; thin ends meet the bones.
+            [-0.11, 0.11].forEach((lz) => {
+                const leg = new THREE.Mesh(cachedItemAsset('chickenLegGeo', () => new THREE.CylinderGeometry(0.045, 0.028, 0.18, 10)), roastMat);
+                leg.position.set(0.18, 0.10, lz);
+                leg.rotation.z = Math.PI / 2;
 
-                const bone = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), boneMat);
-                bone.position.set(lx * 1.1, 0.20, 0.22);
+                const bone = new THREE.Mesh(cachedItemAsset('chickenBoneGeo', () => new THREE.SphereGeometry(0.022, 8, 6)), boneMat);
+                bone.position.set(0.275, 0.10, lz);
                 group.add(leg, bone);
             });
 
             // Wings
-            [-0.18, 0.18].forEach((wx) => {
-                const wing = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.16), roastMat);
-                wing.position.set(wx, 0.14, -0.04);
-                wing.rotation.y = wx > 0 ? -0.3 : 0.3;
+            [-0.16, 0.16].forEach((wz) => {
+                const wing = new THREE.Mesh(cachedItemAsset('chickenWingGeo', () => new THREE.BoxGeometry(0.16, 0.08, 0.06)), roastMat);
+                wing.position.set(-0.06, 0.12, wz);
+                wing.rotation.y = wz > 0 ? -0.3 : 0.3;
                 group.add(wing);
             });
 
@@ -2452,14 +2482,23 @@ const BASE_ITEMS = [
             ctx.fillText('$8.99 / EA', 128, 145);
 
             const labelTex = new THREE.CanvasTexture(canvas);
-            const butcherLabel = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.15), new THREE.MeshBasicMaterial({ map: labelTex }));
+            const butcherLabel = new THREE.Mesh(cachedItemAsset('chickenLabelGeo', () => new THREE.PlaneGeometry(0.24, 0.15)), new THREE.MeshBasicMaterial({ map: labelTex }));
             butcherLabel.rotation.x = -Math.PI / 2;
-            butcherLabel.position.set(-0.14, 0.26, -0.10);
+            butcherLabel.position.set(-0.14, 0.332, -0.10);
 
             // Clear shrink wrap shell
-            const wrapMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.18, roughness: 0.1 });
-            const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.28, 0.48), wrapMat);
-            wrap.position.y = 0.14;
+            const wrapMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.18, roughness: 0.1, depthWrite: false });
+            const wrap = new THREE.Mesh(cachedItemAsset('chickenWrapGeo', () => {
+                const geometry = new THREE.BoxGeometry(0.64, 0.29, 0.48);
+                // BoxGeometry face order: +X, -X, +Y, -Y, +Z, -Z. Omit the hidden bottom.
+                const indices = Array.from(geometry.index.array);
+                indices.splice(18, 6);
+                geometry.setIndex(indices);
+                geometry.clearGroups();
+                return geometry;
+            }), wrapMat);
+            // Shell starts above the tray and leaves headroom above the roast.
+            wrap.position.y = 0.185;
 
             group.add(tray, chickenBody, butcherLabel, wrap);
             return group;
@@ -3648,10 +3687,11 @@ const ALT_ITEMS = [
             // Dark roasted coffee canister body
             const tinMat = new THREE.MeshStandardMaterial({ color: 0x321E17, roughness: 0.35, metalness: 0.3 });
             const tin = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.2, 0.2, 0.6, 24),
+                // Open shell meets the base at y=0.02 and lid at y=0.60 without duplicate caps.
+                cachedItemAsset('coffeeTinGeo', () => new THREE.CylinderGeometry(0.2, 0.2, 0.58, 24, 1, true)),
                 tinMat
             );
-            tin.position.y = 0.3;
+            tin.position.y = 0.31;
 
             // Brand label with custom canvas artwork
             const canvas = document.createElement('canvas');
@@ -3710,7 +3750,7 @@ const ALT_ITEMS = [
                 metalness: 0.1
             });
             const label = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.202, 0.202, 0.42, 24, 1, true),
+                cachedItemAsset('coffeeLabelGeo', () => new THREE.CylinderGeometry(0.202, 0.202, 0.42, 24, 1, true)),
                 labelMat
             );
             label.position.y = 0.3;
@@ -3719,13 +3759,13 @@ const ALT_ITEMS = [
             // Gold metallic lid and bottom rim
             const goldMat = new THREE.MeshStandardMaterial({ color: 0xD4AF37, roughness: 0.25, metalness: 0.8 });
             const lid = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.21, 0.21, 0.04, 24),
+                cachedItemAsset('coffeeLidGeo', () => new THREE.CylinderGeometry(0.21, 0.21, 0.04, 24)),
                 goldMat
             );
             lid.position.y = 0.62;
 
             const baseRim = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.205, 0.205, 0.02, 24),
+                cachedItemAsset('coffeeBaseGeo', () => new THREE.CylinderGeometry(0.205, 0.205, 0.02, 24)),
                 goldMat
             );
             baseRim.position.y = 0.01;
@@ -5370,16 +5410,29 @@ document.addEventListener('shop:cart-skin-change', () => {
 });
 
 // Create an identical detailed wire cart model and physics for a customer
+const NPC_CART_FOLLOW_OFFSET = 0.33 + 0.72 * CartPhys.CART_SCALE;
+
+function npcCartHeading(cust) {
+    // The customer's quaternion is authoritative; XYZ Euler Y folds beyond ±90°.
+    const q = cust.quaternion;
+    return Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y));
+}
+
 function createNpcCartForCustomer(cust) {
-    const group = buildWireCartGroup(CONFIG.CART_COLOR || 0xD32F2F);
+    const scale = CartPhys.CART_SCALE;
+    const group = buildWireCartGroup(CONFIG.CART_COLOR || 0xD32F2F, null, scale);
+    const facing = npcCartHeading(cust);
+    group.position.set(cust.body.position.x + Math.sin(facing) * NPC_CART_FOLLOW_OFFSET, 0, cust.body.position.z + Math.cos(facing) * NPC_CART_FOLLOW_OFFSET);
+    group.rotation.y = facing;
     scene.add(group);
 
     // Kinematic physics body for collisions (ignore own customer)
-    const shape = new CANNON.Box(new CANNON.Vec3(0.4, 0.45, 0.6));
+    const shape = new CANNON.Box(new CANNON.Vec3(0.4 * scale, 0.45 * scale, 0.6 * scale));
     const body = new CANNON.Body({ mass: 0, shape });
     body.collisionFilterGroup = 8;
     body.collisionFilterMask = 1 | 2 | 8;
-    body.position.set(cust.body.position.x, 0.45, cust.body.position.z);
+    body.position.set(group.position.x, 0.45 * scale, group.position.z);
+    body.quaternion.setFromEuler(0, facing, 0);
     world.addBody(body);
 
     // Precompute slots inside cart (local coordinates inside hollow basket)
@@ -5390,38 +5443,29 @@ function createNpcCartForCustomer(cust) {
             const lx = -0.18 + c * 0.36;
             const lz = -0.32 + r * 0.32;
             const ly = 0.45 + (Math.random()*0.05 - 0.025);
-            slots.push({ x: lx, y: ly, z: lz });
+            slots.push({ x: lx * scale, y: ly * scale, z: lz * scale });
         }
     }
 
     return { group, body, slots, items: [], wobblePhase: Math.random()*Math.PI*2 };
 }
 
-// Smoothly sync NPC cart to customer each frame
+// The shopper already smooths its heading; keep the handle rigidly in front of them.
 function updateNpcCartFollow(cust, delta) {
     if (!cust.hasCart || !cust.cart || !cust.body) return;
     const velx = cust.body.velocity.x, velz = cust.body.velocity.z;
     const speed = Math.hypot(velx, velz);
     
-    // Smooth facing aligned with customer rotation
-    const facing = cust.rotation.y || 0;
-    const offset = 0.75; // meters in front of customer
+    const facing = npcCartHeading(cust);
+    const offset = NPC_CART_FOLLOW_OFFSET; // keep the scaled handle 0.33m in front
     const targetX = cust.body.position.x + Math.sin(facing) * offset;
     const targetZ = cust.body.position.z + Math.cos(facing) * offset;
     const targetY = 0; // ground
 
-    // Lerp cart group for smooth visuals
+    // Independent position/yaw lerps let the shopper turn away and drag the cart sideways.
     const g = cust.cart.group;
-    const lerp = Math.min(1.0, (delta || 0.016) * 12.0);
-    g.position.x += (targetX - g.position.x) * lerp;
-    g.position.z += (targetZ - g.position.z) * lerp;
-    g.position.y = targetY;
-
-    // Smooth rotational alignment
-    let diff = facing - g.rotation.y;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    g.rotation.y += diff * lerp;
+    g.position.set(targetX, targetY, targetZ);
+    g.rotation.y = facing;
 
     // Subtle tilt when moving
     g.rotation.x = -Math.min(0.08, speed * 0.03);
@@ -5435,7 +5479,9 @@ function updateNpcCartFollow(cust, delta) {
 
     // Sync physics body directly
     if (cust.cart.body) {
-        cust.cart.body.position.set(g.position.x, 0.45, g.position.z);
+        cust.cart.body.position.set(g.position.x, 0.45 * CartPhys.CART_SCALE, g.position.z);
+        cust.cart.body.quaternion.setFromEuler(0, facing, 0);
+        cust.cart.body.aabbNeedsUpdate = true;
     }
 }
 
@@ -10630,11 +10676,38 @@ function createShoppingCart() {
     cart3D = buildWireCartGroup(CONFIG.CART_COLOR || 0xD32F2F, equippedCartSkin(), CartPhys.CART_SCALE);
     cartObject.add(cart3D);
     cartObject.position.set(0, 0, -24.5);
+    createPlayerCartHands();
 
     const babyChance = Number(CONFIG.BABY_IN_CART_CHANCE ?? 7);
     if (!isLonelyStoreMode && Math.random() * 100 < babyChance) {
         createCartBaby();
     }
+}
+
+function createPlayerCartHands() {
+    const visual = cart3D.userData.visual;
+    const geometry = cachedItemAsset('cartHandGeo', () => new THREE.SphereGeometry(1, 10, 6));
+    const material = cachedItemAsset('cartHandMaterial', () => new THREE.MeshStandardMaterial({ color: 0xffd1a4, roughness: 0.8 }));
+    const left = new THREE.Mesh(geometry, material);
+    const right = new THREE.Mesh(geometry, material);
+    // Cart faces +Z: from behind its handle, +X is the player's left.
+    left.position.set(0.25, 0.985, -0.73);
+    right.position.set(-0.25, 0.985, -0.73);
+    left.scale.set(0.075, 0.048, 0.085);
+    right.scale.copy(left.scale);
+    left.raycast = right.raycast = () => {};
+    visual.add(left, right);
+    cart3D.userData.playerHands = { left, right };
+    updatePlayerCartHands();
+}
+
+function updatePlayerCartHands() {
+    const hands = cart3D?.userData.playerHands;
+    if (!hands) return;
+    const gripping = gameStarted && !gameOver && !isCheckout && cartAttached && !cartFlingActive;
+    const slapping = slapActive && !!slapHand;
+    hands.left.visible = gripping && !(slapping && slapHand.userData.fromLeft);
+    hands.right.visible = gripping && !(slapping && !slapHand.userData.fromLeft);
 }
 
 function createCartBaby() {
@@ -15469,6 +15542,7 @@ function animate() {
 
     // Compute frame delta for consistent physics stepping
     const delta = clock.getDelta();
+    updatePlayerCartHands();
     updateGlassesBlur(delta);
     if (Thermo.isThermostatActive()) {
         if (gameOver || !gameStarted) Thermo.resetThermostat();
@@ -15868,6 +15942,7 @@ function animate() {
             slapActive = false;
             if (slapHand && slapHand.parent) { try { slapHand.parent.remove(slapHand); } catch(_) {} }
             slapHand = null;
+            updatePlayerCartHands();
             // Ensure renderer canvas transform cleared at end
             try {
                 if (renderer && renderer.domElement) {
@@ -16771,6 +16846,9 @@ function animate() {
     // Cart hull in the world (thrown items land in it) and the basket contents
     CartPhys.updateCartHull(delta, !!(cartObject?.visible && gameStarted && !isCheckout));
     CartPhys.stepCartPhysics(delta);
+    updateSpillTracks(scene, productSpills, playerBody, cart3D,
+        gameStarted && !gamePaused && !gameOver && !isCheckout && !tripped,
+        cartAttached && !cartFlingActive && !!cartObject?.visible, now);
 
     // Update Store Worker Restocker
     updateStoreWorker(delta);
@@ -16989,6 +17067,7 @@ function performSlap() {
     // Initialize animation
     const dir = spawnSlapHand(); // -1 for left->right, 1 for right->left
     slapActive = true;
+    updatePlayerCartHands();
     slapStart = performance.now();
     slapDidImpact = false;
 
@@ -18178,6 +18257,7 @@ function createProductSpillAt(x, z, itemName = 'Liquid') {
         x,
         z,
         radius: 2.6,
+        trackColor: tintColor,
         sticky
     };
     productSpills.push(spillEntry);
@@ -18288,7 +18368,8 @@ function triggerProductSpill() {
         body: spillBody,
         x,
         z,
-        radius: 3.8
+        radius: 3.8,
+        trackColor: 0xb91c1c
     };
     productSpills.push(spillEntry);
     productSpill = spillMesh;
@@ -20634,6 +20715,14 @@ function detachAllEventHandlers() {
 // Centralized session cleanup: stop audio, loops, timers, event listeners, physics, animations, and UI overlays
 function cleanupSessionResources() {
     clearGlassesBlur();
+    clearSpillTracks();
+    if (slapHand?.parent) slapHand.parent.remove(slapHand);
+    slapHand = null;
+    slapActive = false;
+    if (cart3D?.userData.playerHands) {
+        cart3D.userData.playerHands.left.visible = false;
+        cart3D.userData.playerHands.right.visible = false;
+    }
     // 1) Stop all audio and loops
     stopAllAudio();
 
