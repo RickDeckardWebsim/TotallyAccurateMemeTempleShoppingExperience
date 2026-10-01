@@ -19467,7 +19467,7 @@ function init() {
     updateScoreboard();
     loadingElement.style.display = 'none';
 
-    // While the menu is up (its picture loads first: index.html preloads it), download what a run needs (textures,
+    // While the menu is up (its picture is in index.html, so it starts loading with the page's CSS), download what a run needs (textures,
     // sky, core sounds, fonts; Play waits for these), then quietly the extras (event sounds...), so nothing loads mid-run.
     preloadAllGameAssets()
         .catch(e => console.warn('Background pre-stream:', e))
