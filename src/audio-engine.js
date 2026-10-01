@@ -86,6 +86,10 @@ export function prefetchSoundFiles() {
         fetched.set(f, p);
     }
 }
+/** All sound off or on (the menu's speaker button / Settings > Sound). */
+export function setMuted(muted) {
+    if (bus && !/[?&]mute\b/.test(location.search)) bus.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.02);
+}
 /** Is this file in the pack (played from memory) rather than a file of its own? */
 export function isPacked(src) { return packed.has(href(src)); }
 // Where a sound's audio is: {b: buffer, start, dur} (a stretch of the pack, or all of its own file)
