@@ -9,6 +9,7 @@ import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
 import { createSound, setListener, loadSoundPacks, prefetchSoundFiles, setMuted } from './src/audio-engine.js';
+import { watchHiddenBottom } from './src/visible-area.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
 import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
 import { setupScene as setupSceneExt, setupPhysics as setupPhysicsExt } from './src/environment.js';
@@ -796,6 +797,7 @@ try {
     }
 } catch (_) {}
 // All sound on/off: the main menu's speaker button and Settings > Sound (music alone: the mute key, M)
+watchHiddenBottom(); // (websim's phone layout hides the bottom of the game's frame)
 let audioMuted = false;
 try { audioMuted = localStorage.getItem('audioMuted') === 'true'; } catch (_) {}
 setMuted(audioMuted);
