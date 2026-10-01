@@ -1,0 +1,188 @@
+/* "Other Tasks" paper: yellow legal pad variant of the grocery list */
+#shopping-list.other-page {
+    background-color: #fff6b8;
+    background-image:
+        linear-gradient(90deg, transparent 36px, #e8a0a0 36px, #e8a0a0 38px, transparent 38px),
+        repeating-linear-gradient(transparent, transparent 27px, #b9cde6 27px, #b9cde6 28px);
+    border-color: #e6d98a;
+    transform: rotate(1.2deg);
+}
+#shopping-list.other-page h3 { color: #1e3a8a; border-bottom-color: rgba(30, 58, 138, 0.25); }
+
+#shopping-list.page-flip { animation: listPageFlip 0.32s ease-out; }
+@keyframes listPageFlip {
+    0% { transform: perspective(600px) rotateX(-70deg) translateY(-12px); opacity: 0.2; }
+    100% { opacity: 1; }
+}
+
+.list-item.locked { color: #94a3b8; }
+.list-item.locked .list-check { border-color: transparent; font-size: 11px; }
+
+.list-note {
+    font-size: 0.95rem;
+    line-height: 22px;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+.list-tabs {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 0.9rem;
+    line-height: 20px;
+    color: #94a3b8;
+}
+.list-tabs span { padding: 0 6px; border-radius: 4px; border: 1px solid transparent; }
+.list-tabs span.on { color: #1e293b; border-color: #94a3b8; background: rgba(255, 255, 255, 0.55); }
+
+.paid-stamp {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    padding: 0 8px;
+    border: 3px solid #16a34a;
+    border-radius: 6px;
+    color: #16a34a;
+    font: 700 1.5rem 'Caveat', cursive;
+    line-height: 30px;
+    transform: rotate(-12deg);
+    opacity: 0.85;
+}
+
+/* Minigame HUD (pee targets, throw power, eating, car) */
+#sq-hud {
+    position: absolute;
+    left: 50%;
+    bottom: 16%;
+    transform: translateX(-50%);
+    min-width: 220px;
+    padding: 10px 16px;
+    background: rgba(15, 23, 42, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    color: #fff;
+    font: 700 1.1rem 'Patrick Hand', sans-serif;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 102;
+}
+#sq-hud.visible { opacity: 1; }
+#sq-hud .sq-bar {
+    height: 10px;
+    margin-top: 6px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+}
+#sq-hud .sq-bar div { height: 100%; background: linear-gradient(90deg, #facc15, #f97316); }
+#sq-hud .sq-sub { margin-top: 4px; font-size: 0.9rem; font-weight: 400; color: #cbd5e1; }
+
+#trunk-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 1100;
+    display: grid;
+    place-items: center;
+    background: rgba(12, 21, 31, 0.88);
+    user-select: none;
+    touch-action: none;
+}
+.trunk-scene {
+    width: min(92vw, 660px);
+    padding: 20px 22px 24px;
+    box-sizing: border-box;
+    border-radius: 22px;
+    color: #f8fafc;
+    background: linear-gradient(#344452, #1b2935);
+    border: 3px solid #64748b;
+    box-shadow: 0 24px 80px #000a;
+    text-align: center;
+    font-family: 'Patrick Hand', sans-serif;
+}
+.trunk-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: clamp(24px, 5vw, 34px);
+    margin-bottom: 14px;
+}
+.trunk-count { font-size: 23px; color: #facc15; }
+.trunk-lid {
+    max-width: 440px;
+    margin: auto;
+    padding: 7px;
+    border-radius: 60% 60% 8px 8px;
+    background: #147e87;
+    border: 4px solid #9dd6da;
+    border-bottom: 0;
+    font: 700 16px monospace;
+    letter-spacing: 0.32em;
+}
+.trunk-dropzone {
+    position: relative;
+    width: min(100%, 460px);
+    height: clamp(110px, 22vh, 160px);
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border: 9px solid #158a91;
+    border-top: 7px solid #0b4650;
+    border-radius: 5px 5px 25px 25px;
+    box-sizing: border-box;
+    background: radial-gradient(ellipse at 50% 75%, #364a50, #0c181e 75%);
+    box-shadow: inset 0 14px 26px #0009, 0 3px 0 #aad6d4;
+    color: #b9d3d3;
+    font-size: 18px;
+    pointer-events: none;
+}
+.trunk-loaded { display: flex; flex-wrap: wrap; justify-content: center; font-size: 30px; }
+.trunk-bumper {
+    width: min(100%, 490px);
+    height: 14px;
+    margin: 2px auto 20px;
+    background: #aab6bc;
+    border-radius: 4px 4px 14px 14px;
+}
+.trunk-groceries {
+    display: flex;
+    min-height: 104px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.trunk-bag {
+    width: 84px;
+    min-height: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    border: 2px solid #e8ce98;
+    background: #fff0c4;
+    color: #443320;
+    cursor: grab;
+    touch-action: none;
+    position: relative;
+    font: 700 15px/1 'Patrick Hand', sans-serif;
+    box-shadow: 0 4px 0 #af8e59;
+}
+.trunk-bag.dragging { cursor: grabbing; z-index: 1; box-shadow: 0 12px 20px #0009; }
+.trunk-bag-icon { font-size: 36px; line-height: 40px; }
+.trunk-bag-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trunk-hint { margin-top: 12px; color: #cbd5e1; font-size: 18px; }
+@media (max-height: 550px) {
+    .trunk-scene { padding: 10px 14px; }
+    .trunk-heading { margin-bottom: 3px; }
+    .trunk-groceries { min-height: 68px; }
+    .trunk-bag { width: 70px; min-height: 66px; }
+    .trunk-bag-icon { font-size: 26px; line-height: 28px; }
+    .trunk-bumper { margin-bottom: 8px; }
+}

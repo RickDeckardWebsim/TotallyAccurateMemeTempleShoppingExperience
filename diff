@@ -1,0 +1,18 @@
+--- index.html
++++ index.html
+@@ -89,12 +89,12 @@
+                 </div>
+                 <div class="slider-container">
+                     <label for="item-add-chance">Item Add Chance (%):</label>
+-                    <input type="range" id="item-add-chance" min="0" max="1" step="0.001">
++                    <input type="range" id="item-add-chance" min="0" max="10" step="0.001">
+                     <span class="value-display"></span>
+                 </div>
+                 <div class="slider-container">
+                     <label for="item-remove-chance">Item Remove Chance (%):</label>
+-                    <input type="range" id="item-remove-chance" min="0" max="1" step="0.001">
++                    <input type="range" id="item-remove-chance" min="0" max="10" step="0.001">
+                     <span class="value-display"></span>
+                 </div>
+             </div>
+

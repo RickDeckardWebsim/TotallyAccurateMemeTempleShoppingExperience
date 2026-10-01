@@ -1,0 +1,81 @@
+/* Thermostat malfunction screen effects — sits under the HUD (#ui-container is z 10) */
+#thermostat-overlay {
+    --heat: 0;
+    --cold: 0;
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+#thermostat-overlay > div {
+    position: absolute;
+    inset: 0;
+}
+
+.thermo-heat {
+    opacity: var(--heat);
+    background:
+        radial-gradient(ellipse at center, rgba(255, 90, 20, 0) 38%, rgba(255, 70, 10, 0.35) 72%, rgba(190, 20, 0, 0.62) 100%),
+        linear-gradient(0deg, rgba(255, 120, 30, 0.22), rgba(255, 60, 0, 0.1));
+    mix-blend-mode: screen;
+    animation: thermo-heat-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes thermo-heat-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.25); }
+}
+
+.thermo-sweat {
+    opacity: var(--heat);
+}
+
+.thermo-drop {
+    position: absolute;
+    top: -40px;
+    width: var(--size);
+    height: calc(var(--size) * 1.35);
+    border-radius: 50% 50% 50% 50% / 62% 62% 40% 40%;
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85) 0 12%, rgba(210, 235, 255, 0.35) 30%, rgba(160, 200, 230, 0.18) 70%);
+    box-shadow: inset -2px -3px 4px rgba(255, 255, 255, 0.4), 0 2px 5px rgba(0, 0, 0, 0.15);
+    animation: thermo-drip var(--dur) cubic-bezier(0.55, 0, 0.8, 0.6) infinite;
+}
+
+.thermo-drop::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 100%;
+    width: 35%;
+    height: 180%;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: linear-gradient(to top, rgba(210, 235, 255, 0.3), rgba(210, 235, 255, 0));
+}
+
+@keyframes thermo-drip {
+    0% { transform: translateY(0); opacity: 0; }
+    10% { opacity: 1; }
+    35% { transform: translateY(18vh); }
+    85% { opacity: 1; }
+    100% { transform: translateY(105vh); opacity: 0; }
+}
+
+.thermo-frost {
+    opacity: var(--cold);
+    background:
+        radial-gradient(ellipse at center, rgba(220, 240, 255, 0) 42%, rgba(200, 230, 255, 0.4) 70%, rgba(235, 248, 255, 0.85) 100%),
+        linear-gradient(0deg, rgba(120, 180, 255, 0.14), rgba(120, 180, 255, 0.14));
+}
+
+.thermo-frost::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cg stroke='white' stroke-width='1.4' stroke-linecap='round' fill='none' opacity='0.8'%3E%3Cpath d='M40 20v36M22 38h36M27 25l26 26M53 25L27 51'/%3E%3Cpath d='M160 120v24M148 132h24M151 123l18 18M169 123l-18 18'/%3E%3Cpath d='M100 170v16M92 178h16M94 172l12 12M106 172l-12 12'/%3E%3Cpath d='M180 30v14M173 37h14'/%3E%3Cpath d='M30 150v12M24 156h12'/%3E%3C/g%3E%3C/svg%3E");
+    -webkit-mask-image: radial-gradient(ellipse at center, transparent 45%, #000 85%);
+    mask-image: radial-gradient(ellipse at center, transparent 45%, #000 85%);
+    opacity: 0.7;
+}

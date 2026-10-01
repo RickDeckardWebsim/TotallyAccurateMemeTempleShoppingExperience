@@ -1,0 +1,90 @@
+#ios-help {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: grid;
+    place-items: center;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    background: rgba(8, 20, 36, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    font-family: 'Patrick Hand', sans-serif;
+}
+#ios-help .ih-card {
+    width: min(460px, 100%);
+    max-height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+    padding: 18px 20px 20px;
+    border-radius: 18px;
+    background: linear-gradient(160deg, #f5fbff, #d8ecfb);
+    border: 1px solid #fff;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+    color: #21415f;
+}
+#ios-help h2 {
+    margin: 0 0 8px;
+    font: 700 1.6rem 'Patrick Hand', sans-serif;
+}
+#ios-help ul {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-size: 1.05rem;
+    line-height: 1.35;
+}
+#ios-help li { margin: 5px 0; }
+#ios-help .ih-note {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #fff4d6;
+    color: #6b4a0b;
+    font-size: 1rem;
+}
+#ios-help code { font-size: 0.8rem; word-break: break-word; }
+#ios-help .ih-small {
+    margin: 0 0 14px;
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+#ios-help .ih-go {
+    display: block;
+    width: 100%;
+    padding: 13px;
+    border: 0;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #4cd964, #1e9e43);
+    color: #fff;
+    font: 700 1.3rem 'Patrick Hand', sans-serif;
+    letter-spacing: 1px;
+    box-shadow: 0 8px 18px rgba(30, 158, 67, 0.35);
+    touch-action: manipulation;
+    cursor: pointer;
+}
+#ios-help .ih-go:active { transform: scale(0.98); }
+
+@media (max-height: 430px) {
+    #ios-help .ih-card { padding: 12px 16px 14px; }
+    #ios-help h2 { font-size: 1.3rem; margin-bottom: 4px; }
+    #ios-help ul { font-size: 0.95rem; margin-bottom: 6px; }
+    #ios-help li { margin: 2px 0; }
+    #ios-help .ih-small { margin-bottom: 8px; }
+    #ios-help .ih-go { padding: 9px; font-size: 1.15rem; }
+}
+
+#ss-error-bar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 6000;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(160, 20, 30, 0.92);
+    color: #fff;
+    font: 12px/1.35 ui-monospace, Menlo, monospace;
+    word-break: break-word;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+#ss-error-bar::after { content: "tap to dismiss"; display: block; opacity: 0.6; margin-top: 4px; }

@@ -1,0 +1,571 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Shopping Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Patrick+Hand&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="side-quests.css">
+    <link rel="stylesheet" href="thermostat.css">
+    <link rel="stylesheet" href="nuke.css">
+    <link rel="stylesheet" href="spectate.css">
+    <link rel="stylesheet" href="menu-layout.css">
+    <link rel="stylesheet" href="touch-controls.css">
+    <link rel="stylesheet" href="ios-help.css">
+    <link rel="stylesheet" href="seed-dev.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.159.0/examples/jsm/",
+            "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui-container">
+            <div id="shopping-list"></div>
+            <div id="savings-tab" class="hidden">Savings <strong id="savings-amount">$0.00</strong></div>
+            <!-- Powerup Card underneath shopping list -->
+            <div id="powerup-card" class="powerup-card hidden">
+                <div class="powerup-card-body">
+                    <span class="powerup-card-icon" id="powerup-card-icon">⚡</span>
+                    <div class="powerup-card-details">
+                        <div class="powerup-card-title" id="powerup-card-title">SUPER SPEED</div>
+                        <div class="powerup-card-status" id="powerup-card-status">Press <kbd>Y</kbd> to activate</div>
+                    </div>
+                </div>
+                <div class="powerup-progress-bar" id="powerup-progress-bar"></div>
+            </div>
+            <div id="timer">00:00:00.00</div>
+            <div id="message"></div>
+        </div>
+        <div id="theft-alert-overlay" class="theft-alert-overlay hidden">
+            <div class="theft-alert-box">
+                <div class="theft-alert-badge">🚨 YOINK! 🚨</div>
+                <div class="theft-alert-msg" id="theft-alert-msg">A customer just swiped an item from your cart!</div>
+            </div>
+        </div>
+        <div id="item-hover-text"></div>
+        <div id="checkout-ui" class="hidden"></div>
+        <div id="game-over" class="hidden">
+            <h2>Shopping Complete!</h2>
+            <p>Your time: <span id="final-time">00:00:00.00</span></p>
+            <div id="game-stats"></div>
+            <button id="play-again">Shop Again</button>
+        </div>
+        <div id="loading">
+            <div class="loading-inner">
+                <div class="loading-spinner-wrap">
+                    <div class="loading-ring"></div>
+                    <img id="loading-spinner" src="loading dude.png" alt="Loading shopper">
+                </div>
+                <h2>Loading Shopping Simulator...</h2>
+            </div>
+            <div id="loading-hint">Hints are loading...</div>
+        </div>
+        <!-- Always-on-top alerts overlay -->
+        <div id="alerts-overlay">
+            <div id="center-alert"></div>
+        </div>
+        <div id="customization-menu">
+            <h2>Game Customization</h2>
+            
+            <div class="customization-search-box">
+                <input type="text" id="customization-search" placeholder="🔍 Search RNG events (e.g. thief, gum, earthquake)..." autocomplete="off" />
+            </div>
+            <div class="settings-tabs customization-tabs" role="tablist" aria-label="Customization categories">
+                <button type="button" class="settings-tab-btn active" data-custom-tab="custom-main" role="tab" aria-selected="true">Game & Events</button>
+                <button type="button" class="settings-tab-btn" data-custom-tab="custom-side-quests" role="tab" aria-selected="false">Side Quests</button>
+            </div>
+            <div id="custom-main" class="custom-tab-pane active" role="tabpanel">
+
+            <div class="customization-section">
+                <h3>Game Settings</h3>
+                <div class="slider-container">
+                    <label for="shelf-count">Number of Shelves:</label>
+                    <input type="range" id="shelf-count" min="5" max="14" step="1">
+                    <span class="value-display"></span>
+                    <button type="button" class="random-vanilla-btn" data-for="shelf-count" aria-pressed="false">Random Vanilla</button>
+                </div>
+                <div class="slider-container">
+                    <label for="item-count">Number of Shopping List Items:</label>
+                    <input type="range" id="item-count" min="1" max="20" step="1">
+                    <span class="value-display"></span>
+                    <button type="button" class="random-vanilla-btn" data-for="item-count" aria-pressed="false">Random Vanilla</button>
+                </div>
+            </div>
+
+            <div class="customization-section">
+                <h3>Event Probabilities</h3>
+                <div class="slider-container">
+                    <label for="two-in-one">2-in-1 Item Chance (%):</label>
+                    <input type="range" id="two-in-one" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="accidental-drop">Accidental Drop Chance (%):</label>
+                    <input type="range" id="accidental-drop" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="baby-in-cart-chance">Baby in Cart Chance (% per game):</label>
+                    <input type="range" id="baby-in-cart-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="baby-crying-chance" title="With a baby in the cart, tantrums have a fixed 35% chance on each event reroll.">Baby Tantrum Chance (% per reroll):</label>
+                    <input type="range" id="baby-crying-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="checkout-busy">Busy Checkout Chance (%):</label>
+                    <input type="range" id="checkout-busy" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <!-- NEW: Call from wife chance -->
+                <div class="slider-container">
+                    <label for="wife-call-chance">Call from Wife Chance (% per game):</label>
+                    <input type="range" id="wife-call-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="cart-stuck-chance">Cart Wheel Stuck Chance (%):</label>
+                    <input type="range" id="cart-stuck-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="checkout-button">Checkout Button Required Chance (%):</label>
+                    <input type="range" id="checkout-button" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="customer-question">Customer Question Chance (%):</label>
+                    <input type="range" id="customer-question" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="customer-scuffle-chance">Customer Scuffle Chance (%):</label>
+                    <input type="range" id="customer-scuffle-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="customer-theft-chance">Customer Theft Chance (% per second while touching):</label>
+                    <input type="range" id="customer-theft-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <!-- NEW: Earthquake chance -->
+                <div class="slider-container">
+                    <label for="earthquake-chance">Earthquake Chance (% per game):</label>
+                    <input type="range" id="earthquake-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="nuclear-fallout-chance">Nuclear Fallout Chance (% per game, once per run):</label>
+                    <input type="range" id="nuclear-fallout-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="empty-shelf">Empty Shelf Chance (% per game that 1 shelf is empty):</label>
+                    <input type="range" id="empty-shelf" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="falling-shelf-chance">Falling Shelf Chance (%):</label>
+                    <input type="range" id="falling-shelf-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="forgot-glasses">Forgot Your Glasses Chance (%):</label>
+                    <input type="range" id="forgot-glasses" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <!-- Freezer Chance per shelf -->
+                <div class="slider-container">
+                    <label for="shelf-replace-chance">Freezer Chance (% per shelf):</label>
+                    <input type="range" id="shelf-replace-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="gum-craving-chance">Gum Craving Chance (% at checkout):</label>
+                    <input type="range" id="gum-craving-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="item-add-chance">Item Add Chance (% per second):</label>
+                    <input type="range" id="item-add-chance" min="0" max="10" step="0.01">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="out-of-stock-chance">Item Out of Stock Chance (%):</label>
+                    <input type="range" id="out-of-stock-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="item-remove-chance">Item Remove Chance (% per second):</label>
+                    <input type="range" id="item-remove-chance" min="0" max="10" step="0.01">
+                    <span class="value-display"></span>
+                </div>
+                <!-- NEW: Lonely Store whole-run modifier chance -->
+                <div class="slider-container">
+                    <label for="lonely-store-chance">Lonely Store Chance (% per game):</label>
+                    <input type="range" id="lonely-store-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <!-- NEW: Manager jumpscare chance -->
+                <div class="slider-container">
+                    <label for="manager-jumpscare">Manager Jumpscare Chance (% per game):</label>
+                    <input type="range" id="manager-jumpscare" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="mislabeled-chance">Mislabeled Item Chance (% per pickup):</label>
+                    <input type="range" id="mislabeled-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="weight-change-chance">Weight Change Chance (% per pickup):</label>
+                    <input type="range" id="weight-change-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="no-money">No Money Chance (%):</label>
+                    <input type="range" id="no-money" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="power-outage">Power Outage Chance (%):</label>
+                    <input type="range" id="power-outage" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="powerup-chance">Powerup Chance (%):</label>
+                    <input type="range" id="powerup-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="product-spill">Product Spill Chance (%):</label>
+                    <input type="range" id="product-spill" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="single-item-list">Single-Item Shopping List Chance (%):</label>
+                    <input type="range" id="single-item-list" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="slippery-floor">Slippery Floor Chance (%):</label>
+                    <input type="range" id="slippery-floor" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="store-closing">Store Closing Chance (%):</label>
+                    <input type="range" id="store-closing" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="thermostat-chance">Thermostat Malfunction Chance (%):</label>
+                    <input type="range" id="thermostat-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="thief-chance">Thief Break-in Chance (%):</label>
+                    <input type="range" id="thief-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="trip-chance">Trip Chance (%):</label>
+                    <input type="range" id="trip-chance" min="0" max="1" step="0.001">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="tweaker-chance">Tweaker Chance (%):</label>
+                    <input type="range" id="tweaker-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+                <div class="slider-container">
+                    <label for="under-construction-chance">Under Construction Zone Chance (% per game):</label>
+                    <input type="range" id="under-construction-chance" min="0" max="100" step="0.1">
+                    <span class="value-display"></span>
+                </div>
+            </div>
+            </div>
+            <div id="custom-side-quests" class="custom-tab-pane" role="tabpanel">
+                <div class="customization-section">
+                    <h3>Side Quest RNG</h3>
+                    <div class="slider-container">
+                        <label for="return-item-count">Items to Return:</label>
+                        <input type="range" id="return-item-count" min="1" max="3" step="1">
+                        <span class="value-display"></span>
+                        <button type="button" class="random-vanilla-btn" data-for="return-item-count" aria-pressed="true">Random Vanilla</button>
+                    </div>
+                    <div class="slider-container">
+                        <label for="restroom-duration">Restroom Duration (seconds, minimum adjusts to targets):</label>
+                        <input type="range" id="restroom-duration" min="4" max="14" step="1">
+                        <span class="value-display"></span>
+                        <button type="button" class="random-vanilla-btn" data-for="restroom-duration" aria-pressed="true">Random Vanilla</button>
+                    </div>
+                    <div class="slider-container">
+                        <label for="restroom-targets">Restroom Targets:</label>
+                        <input type="range" id="restroom-targets" min="3" max="6" step="1">
+                        <span class="value-display"></span>
+                        <button type="button" class="random-vanilla-btn" data-for="restroom-targets" aria-pressed="true">Random Vanilla</button>
+                    </div>
+                    <div class="slider-container">
+                        <label for="spare-change-chance">Spare Change Task Chance (% per game):</label>
+                        <input type="range" id="spare-change-chance" min="0" max="100" step="1">
+                        <span class="value-display"></span>
+                    </div>
+                    <div class="slider-container">
+                        <label for="change-given-chance">Customer Gives Change Chance (% per ask):</label>
+                        <input type="range" id="change-given-chance" min="0" max="100" step="1">
+                        <span class="value-display"></span>
+                    </div>
+                    <div class="slider-container">
+                        <label for="more-samples-chance">Want Another Sample Chance (% per sample):</label>
+                        <input type="range" id="more-samples-chance" min="0" max="100" step="1">
+                        <span class="value-display"></span>
+                    </div>
+                    <div class="slider-container">
+                        <label for="car-trouble-chance">Car Starting Trouble Chance (% per drive):</label>
+                        <input type="range" id="car-trouble-chance" min="0" max="100" step="1">
+                        <span class="value-display"></span>
+                    </div>
+                </div>
+            </div>
+
+            <p class="warning-text">Note: Customized games will not count towards best times!</p>
+            
+            <div class="customization-buttons">
+                <button id="zero-all-events">Set All Events to 0%</button>
+                <button id="reset-defaults">Reset to Defaults</button>
+                <button id="save-customization">Play Customized Game</button>
+                <button id="back-to-menu">Back to Menu</button>
+            </div>
+        </div>
+        <div id="settings-menu">
+            <h2>Settings</h2>
+            <div class="settings-tabs">
+                <button type="button" class="settings-tab-btn active" data-tab="settings-tab-general">General</button>
+                <button type="button" class="settings-tab-btn" data-tab="settings-tab-controls">Controls & Keybinds</button>
+            </div>
+
+            <div id="settings-tab-general" class="settings-tab-pane active">
+                <div class="customization-section">
+                    <h3>Audio</h3>
+                    <div class="slider-container">
+                        <label for="music-volume">Music Volume:</label>
+                        <input type="range" id="music-volume" min="0" max="1" step="0.01">
+                        <span class="value-display"></span>
+                    </div>
+                    <div class="slider-container">
+                        <label for="sfx-volume">SFX Volume:</label>
+                        <input type="range" id="sfx-volume" min="0" max="1" step="0.01">
+                        <span class="value-display"></span>
+                    </div>
+                </div>
+                <div class="customization-section">
+                    <h3>Graphics & Performance</h3>
+                    <div class="setting-row">
+                        <label for="lighting-quality">Lighting & Sun Shadows:</label>
+                        <select id="lighting-quality">
+                            <option value="ultra">Ultra (Cinematic Sun & 2048px Shadows)</option>
+                            <option value="high">High (Sun Shadows & Sky Bounce)</option>
+                            <option value="medium">Medium (Crisp Sun & Fast Ambient)</option>
+                            <option value="low">Low (Fast Simple Lighting)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label for="pbr-quality">PBR Materials:</label>
+                        <select id="pbr-quality">
+                            <option value="high">Full PBR (Normal, Roughness, AO, Bump)</option>
+                            <option value="medium">Medium (Normal & Roughness)</option>
+                            <option value="low">Low (Base Color Only)</option>
+                            <option value="off">Off (Fast Diffuse)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label for="render-quality">Resolution Scale:</label>
+                        <select id="render-quality">
+                            <option value="ultra">Ultra (1.5x Supersampling)</option>
+                            <option value="high">High (1.0x Native DPR)</option>
+                            <option value="medium">Medium (Balanced)</option>
+                            <option value="low">Low (0.75x Performance)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label for="scenery-detail">Exterior Scenery Detail:</label>
+                        <select id="scenery-detail">
+                            <option value="high">High (Full Skyline & Scenery)</option>
+                            <option value="medium">Medium (Balanced Distance)</option>
+                            <option value="low">Low (Optimized Plaza)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="customization-section">
+                    <h3>Display</h3>
+                    <label><input type="checkbox" id="show-fps"> Show FPS</label>
+                </div>
+            </div>
+
+            <div id="settings-tab-controls" class="settings-tab-pane">
+                <div class="customization-section">
+                    <h3>In-Game UI</h3>
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="hide-controls-guide"> Hide Controls Box in Game
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="hide-best-times"> Hide Best Times Box in Game
+                    </label>
+                </div>
+                <div class="customization-section">
+                    <h3>Mouse</h3>
+                    <div class="slider-container">
+                        <label for="mouse-sensitivity">Mouse Sensitivity:</label>
+                        <input type="range" id="mouse-sensitivity" min="0.1" max="3" step="0.05">
+                        <span class="value-display"></span>
+                    </div>
+                </div>
+                <div class="customization-section">
+                    <h3>Keybinds</h3>
+                    <p style="font-size: 0.85rem; color: #475569; margin-bottom: 10px;">Click a button to change its assigned key:</p>
+                    <div class="keybinds-list">
+                        <div class="keybind-row">
+                            <span class="keybind-label">Move Forward:</span>
+                            <button type="button" class="keybind-btn" data-action="forward">W</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Move Backward:</span>
+                            <button type="button" class="keybind-btn" data-action="backward">S</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Move Left:</span>
+                            <button type="button" class="keybind-btn" data-action="left">A</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Move Right:</span>
+                            <button type="button" class="keybind-btn" data-action="right">D</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Grab / Drop / Place:</span>
+                            <button type="button" class="keybind-btn" data-action="interact">E</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Jump:</span>
+                            <button type="button" class="keybind-btn" data-action="jump">Space</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Attach / Detach Cart:</span>
+                            <button type="button" class="keybind-btn" data-action="cart">F</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Slap:</span>
+                            <button type="button" class="keybind-btn" data-action="slap">R</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Mute / Unmute Music:</span>
+                            <button type="button" class="keybind-btn" data-action="mute">M</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Pause Game:</span>
+                            <button type="button" class="keybind-btn" data-action="pause">Esc</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Activate Powerup:</span>
+                            <button type="button" class="keybind-btn" data-action="powerup">Y</button>
+                        </div>
+                        <div class="keybind-row">
+                            <span class="keybind-label">Use Mouse:</span>
+                            <button type="button" class="keybind-btn" data-action="useMouse">Tab</button>
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px; text-align: center;">
+                        <button type="button" id="reset-keybinds-btn" class="reset-keybinds-btn">Reset Keybinds to Default</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="customization-buttons">
+                <button id="save-settings">Save</button>
+                <button id="back-from-settings">Back to Menu</button>
+            </div>
+        </div>
+        <!-- Live Database Leaderboard Modal -->
+        <div id="leaderboard-menu">
+            <div class="leaderboard-header">
+                <div class="leaderboard-title">
+                    <span>⚡</span> MagMart Speedrun Leaderboard
+                </div>
+            </div>
+            <div class="leaderboard-table-container">
+                <table class="leaderboard-table" id="leaderboard-table-scores">
+                    <thead>
+                        <tr>
+                            <th style="width: 12%;">Rank</th>
+                            <th style="width: 32%;">Speedrunner</th>
+                            <th style="width: 20%;">Best Time</th>
+                            <th style="width: 12%;">List %</th>
+                            <th style="width: 12%;">Items</th>
+                            <th style="width: 12%;">Replay</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-scores-tbody">
+                        <tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 20px;">Loading fastest speedruns from database...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="lb-speedrun" class="lb-speedrun hidden">
+                <div class="lb-speedrun-text">
+                    Got a great run? If you feel inclined, submit it to
+                    <a href="https://www.speedrun.com/Totally_Accurate_Shopping_Simulator" target="_blank" rel="noopener">speedrun.com</a>!
+                </div>
+                <button type="button" id="lb-export-run" class="lb-export-btn hidden">⬇ Export My Run Video</button>
+            </div>
+            <div class="leaderboard-actions">
+                <div style="font-size: 0.85rem; color: #94a3b8; font-weight: 600;" id="leaderboard-status-label">
+                    ● Fastest Speedrun Records • Auto-syncing
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button id="leaderboard-refresh-btn" class="main-menu-btn" style="width: auto; padding: 8px 18px; font-size: 0.9rem; background: #334155; margin: 0;">↻ Sync Now</button>
+                    <button id="leaderboard-close-btn" class="main-menu-btn" style="width: auto; padding: 8px 18px; font-size: 0.9rem; background: #dc2626; margin: 0;">Close</button>
+                </div>
+            </div>
+        </div>
+        <div id="version-label">V.1.2</div>
+        <button id="open-achievements" class="main-menu-btn hidden" type="button">ACHIEVEMENTS</button>
+        <div id="achievements-menu" class="hidden" role="dialog" aria-modal="true" aria-label="Achievements">
+            <div class="shop-card achievements-card">
+                <div class="shop-header">
+                    <h2>ACHIEVEMENTS</h2>
+                    <button id="achievements-close" type="button" aria-label="Close achievements">×</button>
+                </div>
+                <div class="shop-balance achievements-count">Unlocked <strong id="achievements-count">0 / 10</strong></div>
+                <div id="achievements-list"></div>
+            </div>
+        </div>
+        <div id="achievement-toasts" aria-live="polite"></div>
+        <button id="open-shop" class="main-menu-btn hidden" type="button">SHOP</button>
+        <div id="shop-menu" class="hidden" role="dialog" aria-modal="true" aria-label="Shop">
+            <div class="shop-card">
+                <div class="shop-header">
+                    <h2>SHOP</h2>
+                    <button id="shop-close" type="button" aria-label="Close shop">×</button>
+                </div>
+                <div class="shop-balance">Savings <strong id="shop-balance">$0.00</strong></div>
+                <div id="shop-tabs" class="shop-tabs"></div>
+                <div id="shop-grid" class="shop-grid"></div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="config.js"></script>
+    <script type="module" src="game.js"></script>
+    <script type="module" src="src/touch-controls.js"></script>
+    <script type="module" src="src/spectate/index.js"></script>
+</body>
+</html>

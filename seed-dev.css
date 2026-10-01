@@ -1,0 +1,142 @@
+/* DEV ONLY: run seed badge + Seed Check panel */
+.seed-badge {
+    margin: 12px 0 4px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    text-align: left;
+}
+.seed-badge-head {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.seed-badge-row { display: flex; gap: 8px; align-items: baseline; margin: 3px 0; }
+.seed-badge-row span { flex: none; width: 36px; opacity: 0.7; }
+.seed-badge code, .seed-result-meta code, .seed-result-changes code {
+    font-family: 'Share Tech Mono', ui-monospace, monospace;
+    word-break: break-all;
+    user-select: all;
+}
+.seed-copy {
+    margin-top: 6px;
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: #334155;
+    color: #fff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+#open-seed-check {
+    position: absolute;
+    top: calc(1.4vmin + 8px);
+    left: calc(1.4vmin + 8px);
+    z-index: 1500;
+    padding: 8px 14px;
+    border: 2px solid #fff;
+    border-radius: 12px;
+    background: #1e293b;
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+}
+#open-seed-check.hidden, #seed-check.hidden { display: none; }
+
+#seed-check {
+    position: absolute;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(7, 21, 42, 0.6);
+}
+.seed-check-card {
+    width: min(560px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 20px;
+    border-radius: 18px;
+    border: 2px solid #fff;
+    background: #fff9ed;
+    color: #283e57;
+    display: grid;
+    gap: 10px;
+}
+.seed-check-head { display: flex; justify-content: space-between; align-items: center; }
+.seed-check-head h2 { margin: 0; }
+#seed-check-close { border: 0; background: none; font-size: 28px; line-height: 1; cursor: pointer; color: inherit; }
+#seed-check-input, #seed-check-hash {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 10px;
+    border: 2px solid #cbd5e1;
+    font-family: 'Share Tech Mono', ui-monospace, monospace;
+    font-size: 0.85rem;
+    resize: vertical;
+}
+#seed-check-go { margin: 0; }
+.seed-result-title { font-size: 1.15rem; font-weight: 800; }
+.seed-result-title[data-verdict="vanilla"] { color: #15803d; }
+.seed-result-title[data-verdict="custom"] { color: #b45309; }
+.seed-result-title[data-verdict="modified-build"],
+.seed-result-title[data-verdict="tampered"],
+.seed-result-title[data-verdict="invalid"] { color: #b91c1c; }
+.seed-result-reason { opacity: 0.85; margin-top: 2px; }
+.seed-result-meta, .seed-result-changes { display: grid; gap: 4px; margin-top: 10px; font-size: 0.85rem; }
+.seed-result-meta div, .seed-result-changes div:not(.seed-result-sub) { display: flex; justify-content: space-between; gap: 12px; }
+.seed-result-meta span { opacity: 0.7; }
+.seed-result-sub { font-weight: 800; }
+
+/* DEV ONLY: leaderboard review panel */
+#lb-dev-review {
+    margin-top: 10px;
+    max-height: 38vh;
+    overflow-y: auto;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px dashed rgba(251, 191, 36, 0.5);
+    color: #e2e8f0;
+    font-size: 0.82rem;
+    text-align: left;
+}
+.lb-review-head { margin: 8px 0 4px; font-weight: 800; letter-spacing: 0.05em; color: #fbbf24; }
+.lb-review-head:first-child { margin-top: 0; }
+.lb-review-empty { opacity: 0.6; padding: 2px 0 6px; }
+.lb-review-row { padding: 6px 0; border-top: 1px solid rgba(148, 163, 184, 0.15); }
+.lb-review-main { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lb-review-main code { font-family: 'Share Tech Mono', ui-monospace, monospace; color: #34d399; }
+.lb-review-tag { padding: 1px 7px; border-radius: 999px; background: #334155; font-size: 0.72rem; font-weight: 700; }
+.lb-review-tag[data-ok="1"] { background: #166534; }
+.lb-review-tag[data-ok="0"] { background: #991b1b; }
+.lb-review-reasons { margin: 4px 0 0 2px; opacity: 0.85; font-size: 0.76rem; }
+.lb-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; align-items: center; }
+#lb-dev-review button {
+    padding: 3px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: #334155;
+    color: #fff;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+#lb-dev-review button.ok { background: #16a34a; }
+#lb-dev-review button.bad { background: #b91c1c; }
+#lb-dev-review button:disabled { opacity: 0.5; cursor: default; }
+.lb-review-noreplay { opacity: 0.55; font-size: 0.75rem; }
+
+.lb-submit-note { margin-top: 8px; font-weight: 700; color: #fbbf24; }

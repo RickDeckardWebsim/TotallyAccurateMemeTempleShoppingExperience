@@ -1,0 +1,97 @@
+/* Nuclear Fallout event */
+#nuke-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1200;
+    overflow: hidden;
+}
+
+#nuke-overlay > div { position: absolute; }
+
+.nuke-tint, .nuke-flash, .nuke-wipe, .nuke-black {
+    inset: 0;
+    opacity: 0;
+}
+.nuke-tint { background: radial-gradient(ellipse at 50% 30%, rgba(255, 120, 40, 0.15), rgba(90, 30, 10, 0.55)); }
+.nuke-flash { background: #fffdf5; }
+.nuke-wipe {
+    background: radial-gradient(circle at 50% 50%, #fff7e0 0%, #ffb35a 35%, #c2410c 70%, #3b0f02 100%);
+}
+.nuke-black { background: #000; }
+
+#nuke-overlay.wipe .nuke-wipe { animation: nuke-wipe-burn 0.9s ease-in forwards; }
+@keyframes nuke-wipe-burn {
+    0% { transform: scale(0.2); filter: brightness(2); }
+    100% { transform: scale(1.6); filter: brightness(1); }
+}
+
+/* Banner */
+.nuke-banner {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.6);
+    width: min(92vw, 1100px);
+    padding: 34px 28px 30px;
+    text-align: center;
+    color: #fff;
+    background: repeating-linear-gradient(-45deg, rgba(20, 20, 0, 0.92) 0 28px, rgba(60, 50, 0, 0.92) 28px 56px);
+    border: 6px solid #facc15;
+    border-radius: 10px;
+    box-shadow: 0 0 60px rgba(250, 204, 21, 0.55), 0 0 0 4px #000 inset;
+    font-family: 'Arial Black', Impact, sans-serif;
+    opacity: 0;
+    transition: transform 0.45s cubic-bezier(.2, 1.6, .4, 1), opacity 0.3s ease, top 0.7s ease, width 0.7s ease, padding 0.7s ease;
+}
+#nuke-overlay.show-banner .nuke-banner {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    animation: nuke-banner-pulse 0.9s ease-in-out infinite;
+}
+.nuke-banner-icon {
+    font-size: clamp(48px, 9vw, 110px);
+    line-height: 1;
+    color: #facc15;
+    text-shadow: 0 0 24px rgba(250, 204, 21, 0.8);
+    animation: nuke-spin 3s linear infinite;
+    display: inline-block;
+}
+.nuke-banner-title {
+    margin-top: 10px;
+    font-size: clamp(26px, 5.2vw, 64px);
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+    color: #fef08a;
+    text-shadow: 0 4px 0 #000, 0 0 30px rgba(239, 68, 68, 0.9);
+}
+.nuke-banner-sub {
+    margin-top: 12px;
+    font-size: clamp(34px, 7vw, 92px);
+    color: #ef4444;
+    text-shadow: 0 5px 0 #000, 0 0 40px rgba(239, 68, 68, 1);
+    animation: nuke-blink 0.5s steps(2) infinite;
+}
+
+/* After a few seconds the banner shrinks to a strip at the top */
+#nuke-overlay.banner-small .nuke-banner {
+    top: 64px;
+    width: min(80vw, 640px);
+    padding: 8px 14px;
+}
+#nuke-overlay.banner-small .nuke-banner-icon { font-size: 30px; }
+#nuke-overlay.banner-small .nuke-banner-title { font-size: clamp(14px, 2vw, 22px); margin-top: 2px; }
+#nuke-overlay.banner-small .nuke-banner-sub { font-size: clamp(18px, 2.6vw, 30px); margin-top: 2px; }
+#nuke-overlay.banner-gone .nuke-banner { opacity: 0; animation: none; transition: opacity 0.1s; }
+
+@keyframes nuke-banner-pulse {
+    0%, 100% { box-shadow: 0 0 60px rgba(250, 204, 21, 0.55), 0 0 0 4px #000 inset; border-color: #facc15; }
+    50% { box-shadow: 0 0 90px rgba(239, 68, 68, 0.85), 0 0 0 4px #000 inset; border-color: #ef4444; }
+}
+@keyframes nuke-blink { 50% { opacity: 0.25; } }
+@keyframes nuke-spin { to { transform: rotate(360deg); } }
+
+/* After surviving: nothing left but the wasteland */
+#game-container.nuke-aftermath #ui-container,
+#game-container.nuke-aftermath #alerts-overlay,
+#game-container.nuke-aftermath #rng-notifications,
+#game-container.nuke-aftermath #item-hover-text { display: none !important; }

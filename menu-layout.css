@@ -1,0 +1,128 @@
+/* ---------- Responsive main menu ----------
+   The title is baked into menu-bg.png (3:2), so the art is always shown whole
+   ("contain") over a blurred copy of itself that fills whatever space is left.
+   Buttons are laid out into that leftover space for the current aspect ratio. */
+
+#menu-bg {
+    inset: 1.4vmin;
+    transform: none;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #7fb8e6;
+    filter: none;
+}
+#menu-bg::before,
+#menu-bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("menu-bg.png");
+    background-repeat: no-repeat;
+    pointer-events: none;
+}
+#menu-bg::before {
+    inset: -40px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(28px) saturate(0.9) brightness(0.85);
+}
+#menu-bg::after {
+    background-size: contain;
+    background-position: left top;
+    filter: saturate(0.85) contrast(1.02) brightness(0.96);
+}
+
+/* Buttons scale with the viewport height so they always sit under the title */
+#main-menu {
+    right: calc(1.4vmin + clamp(10px, 2.2vw, 28px));
+    bottom: calc(1.4vmin + clamp(10px, 2.4vh, 28px));
+}
+#main-menu .main-menu-btn {
+    width: clamp(180px, 25vw, 340px);
+    padding: clamp(6px, 1.8vh, 19px) clamp(14px, 2vw, 30px);
+    margin: clamp(5px, 1.3vh, 14px) 0;
+    font-size: clamp(15px, 2.9vh, 1.3em);
+    border-radius: clamp(10px, 1.6vh, 16px);
+}
+
+#open-shop,
+#open-achievements,
+#ss-open {
+    left: calc(1.4vmin + clamp(10px, 2vw, 24px));
+    padding: clamp(6px, 1.5vh, 15px) clamp(14px, 2.6vh, 35px);
+    font-size: clamp(13px, 2.5vh, 1.35rem);
+    border-radius: clamp(10px, 1.5vh, 15px);
+}
+#open-shop         { bottom: calc(1.4vmin + 40px); }
+#open-achievements { bottom: calc(1.4vmin + 40px + clamp(38px, 8.6vh, 72px)); }
+#ss-open           { bottom: calc(1.4vmin + 40px + 2 * clamp(38px, 8.6vh, 72px)); }
+#version-label {
+    left: calc(1.4vmin + 8px);
+    bottom: calc(1.4vmin + 6px);
+    font-size: clamp(11px, 1.8vh, 0.95rem);
+}
+#mute-toggle {
+    top: calc(1.4vmin + clamp(8px, 1.8vh, 24px));
+    right: calc(1.4vmin + clamp(8px, 1.8vw, 24px));
+}
+
+/* ---------- Portrait / tall screens: art on top, buttons stacked below ---------- */
+@media (max-aspect-ratio: 1/1) {
+    #menu-bg::after { background-position: center top; }
+    /* Tuck mute into the art's lower-right shelves, clear of the title */
+    .menu-active #mute-toggle { top: calc(1.4vmin + (100vw - 2.8vmin) / 1.5 - 54px); }
+
+    #main-menu {
+        left: 50%;
+        right: auto;
+        bottom: auto;
+        top: calc(1.4vmin + (100vw - 2.8vmin) / 1.5 + clamp(12px, 3vh, 40px));
+        transform: translateX(-50%);
+        text-align: center;
+    }
+    #main-menu .main-menu-btn {
+        width: min(340px, 76vw);
+        padding: clamp(9px, 1.7vh, 18px) 18px;
+        margin: clamp(8px, 1.6vh, 16px) auto;
+        font-size: clamp(16px, 2.4vh, 1.3em);
+    }
+
+    /* Shop / achievements / spectate become one row along the bottom */
+    #open-shop,
+    #open-achievements,
+    #ss-open {
+        bottom: calc(1.4vmin + 40px + env(safe-area-inset-bottom, 0px));
+        width: 29vw;
+        max-width: 200px;
+        padding: 10px 0;
+        font-size: clamp(12px, 3.4vw, 1.1rem);
+        letter-spacing: 1px;
+        justify-content: center;
+        text-align: center;
+        transform: none;
+    }
+    #open-shop         { left: 3.5vw; }
+    #open-achievements { left: 50%; transform: translateX(-50%); }
+    #ss-open           { left: auto; right: 3.5vw; gap: 6px; }
+    #open-shop:hover, #ss-open:hover { transform: none; }
+    #open-achievements:hover { transform: translateX(-50%); }
+}
+
+/* Very short landscape (phones on their side): tighten everything */
+@media (max-height: 430px) and (min-aspect-ratio: 1/1) {
+    #main-menu .main-menu-btn { margin: 5px 0; }
+    #open-shop         { bottom: calc(1.4vmin + 30px); }
+    #open-achievements { bottom: calc(1.4vmin + 30px + 40px); }
+    #ss-open           { bottom: calc(1.4vmin + 30px + 80px); }
+}
+
+/* Keep the other menus usable on any screen size */
+#customization-menu,
+#settings-menu,
+#leaderboard-menu {
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+}
