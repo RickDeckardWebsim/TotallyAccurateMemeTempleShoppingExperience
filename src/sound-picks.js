@@ -13,5 +13,14 @@ export const SOUND_PICKS = {
   "take": "door-close/el-door-close-b",
   "arriveAt": 1.32,
   "arriveSet": false
+ },
+ "cart-roll-empty": {
+  "src": "sfx/cart_roll_empty.wav",
+  "take": "roll-outdoor/el-roll-outdoor-b",
+  "semitones": -8
+ },
+ "cart-roll-full": {
+  "src": "sfx/cart_roll_full.wav",
+  "take": "roll-indoor/now-cart_roll-fixed"
  }
 };

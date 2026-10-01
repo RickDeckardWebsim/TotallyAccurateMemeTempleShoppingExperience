@@ -668,7 +668,36 @@ function updateAutoDoors() {
 }
 
 let cartRollingRequested = false;
-function updateCartRollingSound(rolling) {
+/* @tweakable Items in the cart at which it rolls with the fully loaded sound */
+const CART_ROLL_FULL_ITEMS = 12;
+// Cart rolling: two loops, an empty metal cart and a loaded one (SOUND_PICKS), blended by how full the
+// basket is (equal power, so the level holds through the blend). Level and pitch follow how fast you
+// push; starting and stopping fade instead of cutting. Without the picked loops: the old on/off loop.
+let cartRollLevel = 0, cartRollAt = 0;
+function updateCartRollingSound(rolling, speed = 0) {
+    const empty = soundEffects?.cartRollEmpty, full = soundEffects?.cartRollFull;
+    if (!empty || !full) { legacyCartRollingSound(rolling); return; }
+    const now = performance.now(), dt = Math.min(0.1, cartRollAt ? (now - cartRollAt) / 1000 : 0);
+    cartRollAt = now;
+    const target = rolling ? Math.min(1, speed / (CONFIG.MOVE_SPEED || 5)) : 0;
+    cartRollLevel += (target - cartRollLevel) * (1 - Math.exp(-dt * (target > cartRollLevel ? 10 : 6)));
+    if (!rolling && cartRollLevel < 0.01) {
+        cartRollLevel = 0;
+        if (!empty.paused) empty.pause();
+        if (!full.paused) full.pause();
+        return;
+    }
+    if (empty.paused) empty.play().catch(() => {});
+    if (full.paused) full.play().catch(() => {});
+    const load = Math.min(1, (collectedItems?.length || 0) / CART_ROLL_FULL_ITEMS);
+    const level = Math.min(1, (CONFIG.SFX_VOLUME ?? 0.7) * BOOSTED_SFX_MULTIPLIERS.cartRoll) * Math.pow(cartRollLevel, 0.7);
+    empty.volume = level * Math.cos(load * Math.PI / 2);
+    full.volume = level * Math.sin(load * Math.PI / 2);
+    const rate = 0.85 + 0.25 * cartRollLevel;
+    empty.playbackRate = rate * Math.pow(2, (SOUND_PICKS['cart-roll-empty']?.semitones || 0) / 12);
+    full.playbackRate = rate;
+}
+function legacyCartRollingSound(rolling) {
     const audio = soundEffects?.cartRoll;
     if (!audio) return;
     if (rolling === cartRollingRequested) return;
@@ -925,7 +954,7 @@ function removePhoneKeyListener() {
 }
 
 function stopAllAudio() {
-    cartRollingRequested = false;
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     customerScuffleMusicMix = 0;
     if (customerScuffleMusic) {
         customerScuffleMusic.pause();
@@ -4176,7 +4205,7 @@ function loadSounds() {
     soundEffects.tweakerGrunt = createSound('sfx/tweaker_grunt.wav');
     soundEffects.moneyPickup = createSound('sfx/money_pickup.wav');
     Object.keys(BOOSTED_SFX_MULTIPLIERS).forEach(name => setBoostedSfxVolume(name));
-    cartRollingRequested = false;
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     sfxKey = singles.sfxKey;
     sfxTada = singles.sfxTada;
     sfxPowerDown = singles.sfxPowerDown;
@@ -15702,7 +15731,7 @@ function animate() {
     // Compute walking head bob and sway (very nuanced, subtle and gentle)
     const playerHVelocity = playerBody ? Math.hypot(playerBody.velocity.x, playerBody.velocity.z) : 0;
     const isWalking = controls.isLocked && !isCheckout && !gamePaused && gameStarted && (playerHVelocity > 0.15);
-    updateCartRollingSound(isWalking && !gameOver && cartAttached && !cartFlingActive);
+    updateCartRollingSound(isWalking && !gameOver && cartAttached && !cartFlingActive, playerHVelocity);
     if (soundEffects?.entranceBeep && !soundEffects.entranceBeep.paused) {
         updateEntranceDoorBeepVolume();
     }
@@ -20415,7 +20444,7 @@ function nukeFreezeRun() {
     cancelScheduledEvents(true);
     if (addItemIntervalId) { clearInterval(addItemIntervalId); addItemIntervalId = null; }
     if (removeItemIntervalId) { clearInterval(removeItemIntervalId); removeItemIntervalId = null; }
-    cartRollingRequested = false;
+    cartRollingRequested = false; cartRollLevel = 0; // (a stop is immediate, not a fade)
     try { updateCartRollingSound(false); } catch (_) {}
     if (soundEffects?.entranceBeep) { try { soundEffects.entranceBeep.pause(); } catch (_) {} }
 }

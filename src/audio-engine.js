@@ -71,10 +71,17 @@ class BufferSound {
         this._offset = 0;     // where play() starts from (seconds)
         this._voice = null;   // {source, gain, startedAt, offset}
         this._duration = NaN;
+        this._rate = 1;
         this._want = 0;       // play() calls waiting for the decode (a pause() in between cancels them)
         // (decoded on first play, or ahead of time by preloadSounds)
     }
     get duration() { return this._duration; }
+    /** Playback speed (1 = as recorded; higher is faster and higher-pitched); glides on a playing voice. */
+    get playbackRate() { return this._rate; }
+    set playbackRate(r) {
+        this._rate = Math.max(0.25, Math.min(4, +r || 1));
+        if (this._voice) this._voice.source.playbackRate.setTargetAtTime(this._rate, ctx.currentTime, 0.05);
+    }
     get volume() { return this._volume; }
     set volume(v) {
         this._volume = Math.max(0, Math.min(1, +v || 0));
@@ -111,7 +118,7 @@ class BufferSound {
         bufferFor(this.src).then(b => {
             if (this.paused || this._voice) return;
             const source = ctx.createBufferSource(), gain = ctx.createGain();
-            source.buffer = b; source.loop = this.loop; this._duration = b.duration;
+            source.buffer = b; source.loop = this.loop; this._duration = b.duration; source.playbackRate.value = this._rate;
             gain.gain.value = this._level();
             source.connect(gain);
             let panner = null;
