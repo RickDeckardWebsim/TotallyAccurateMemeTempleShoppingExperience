@@ -181,6 +181,10 @@ export function loadSounds({ musicMuted = false } = {}) {
   // The cart crashing back down after being flung (tripping); spatial, placed where it lands
   if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 6, maxDistance: 60 } });
 
+  // The baby in the cart giggling (game.js plays a random one): spatial, placed at the cart
+  soundEffects.babyGiggles = ['baby-giggle-a', 'baby-giggle-b', 'baby-giggle-c', 'baby-giggle-d']
+    .filter(j => SOUND_PICKS[j]).map(j => createSound(SOUND_PICKS[j].src, { spatial: { refDistance: 4, maxDistance: 40 } }));
+
   // Grabbing / letting go of the cart handle (F)
   if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);
 
