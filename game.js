@@ -10754,7 +10754,7 @@ CartPhys.initCartPhysics({
         if (fromScuffle) displayMessage(`💥 A flying ${item.name} landed in your cart!`, 2400, true);
     },
     onBump: (strength) => {
-        // the picked bump (SOUND_PICKS 'cart-bump'), else the old thud; harder hits are louder
+        // the picked bump (SOUND_PICKS 'cart-bump') if there is one, else cart_drop.wav; harder hits are louder
         try {
             const base = soundEffects.cartBump || soundEffects.cartAdd;
             if (!base) return;
