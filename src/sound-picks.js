@@ -302,5 +302,10 @@ export const SOUND_PICKS = {
  "drop-watermelon": {
   "src": "sfx/drops/watermelon.mp3",
   "take": "drop-watermelon/el-drop-watermelon-v2"
+ },
+ "cart-crash": {
+  "src": "sfx/cart_crash.mp3",
+  "take": "crash/mine-crashes-1-6",
+  "lowpassHz": 8635
  }
 };

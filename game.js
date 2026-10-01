@@ -16121,6 +16121,11 @@ function animate() {
         if (cartObject.position.y <= cartFlingStartY) {
             cartObject.position.y = cartFlingStartY; cartFlingActive = false;
             CartPhys.wakeCartItems(1.2);
+            // the cart crashing back down (the picked crash, where the cart lands)
+            const crash = soundEffects?.cartCrash;
+            if (crash) {
+                try { const c = crash.cloneNode(); c.setPosition?.(cartObject.position.x, 0.5, cartObject.position.z); c.volume = CONFIG.SFX_VOLUME ?? 0.7; c.play().catch(() => {}); } catch (_) {}
+            }
         }
     }
 

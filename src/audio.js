@@ -185,6 +185,9 @@ export function loadSounds({ musicMuted = false } = {}) {
   // The cart bumping into shelves, walls, people (game.js onBump; louder for harder hits)
   if (SOUND_PICKS['cart-bump']) { soundEffects.cartBump = createSound(SOUND_PICKS['cart-bump'].src); soundEffects.cartBump.volume = CONFIG.SFX_VOLUME; }
 
+  // The cart crashing back down after being flung (tripping); spatial, placed where it lands
+  if (SOUND_PICKS['cart-crash']) soundEffects.cartCrash = createSound(SOUND_PICKS['cart-crash'].src, { spatial: { refDistance: 4, maxDistance: 60 } });
+
   // Grabbing / letting go of the cart handle (F)
   if (SOUND_PICKS['cart-handle']) soundEffects.cartHandle = createSound(SOUND_PICKS['cart-handle'].src);
 
@@ -210,7 +213,7 @@ export function loadSounds({ musicMuted = false } = {}) {
   // the ones a run hears early and often: decoded now, so their first play isn't late
   preloadSounds(['footsteps-on-wood-floor-14735.wav', 'whu6.wav', 'run.wav', 'key.wav', 'sfx/cart_drop.wav', 'sfx/cart_roll.wav',
     'ES_Notification, Attention, Text, Reveal, Positive 01 - Epidemic Sound - 4178-4632.wav', 'sfx/ui_hover.wav', 'sfx/ui_click.wav',
-    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle', 'steps-store', 'steps-lot', 'cart-bump'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src),
+    'sfx/entrance_beep.wav', 'beep2.mp3', ...['door-open', 'door-close', 'cart-roll-empty', 'cart-roll-full', 'cart-roll-rough', 'cart-stuck', 'cart-handle', 'steps-store', 'steps-lot', 'cart-bump', 'cart-crash'].filter(j => SOUND_PICKS[j]).map(j => SOUND_PICKS[j].src),
     ...Object.keys(SOUND_PICKS).filter(j => j.startsWith('drop-')).map(j => SOUND_PICKS[j].src), /* (each item's drop) */ 'Cash_Register_Open_01.wav', 'cartoonslip.mp3']);
 
   return {
