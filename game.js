@@ -25,6 +25,7 @@ import * as CartPhys from './src/cart-physics.js';
 import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
 import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute } from './src/store-layout.js';
 import { addStoreWayfinding } from './src/store-signs.js';
+import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -4587,6 +4588,8 @@ function createStoreLayout() {
         });
     }
 
+    // Release only cosmetic fixture geometry before replacing the layout.
+    clearShelfDetails();
     // Reset per-layout collections
     shelves = [];
     shelfUnits = [];
@@ -9035,6 +9038,8 @@ function createShelf(x, y, z, width, height, depth, direction = 1, rotationY = 0
         }
     }
 
+    addShelfDetails(shelfUnit, tierPositionsY, boardThickness, usableBoardWidth, usableBoardDepth, direction * (backThickness / 2));
+
     // High Performance: Single Compound Cannon Body for the entire shelf unit
     const compoundShelfBody = new CANNON.Body({ mass: 0 });
     compoundShelfBody.position.set(x, y, z);
@@ -9238,6 +9243,8 @@ function createFreezerUnit(x, y, z, width, height, depth, direction = 1, rotatio
         lip.position.set(0, localTierY + boardThickness / 2 + 0.02, direction * (usableBoardDepth / 2 - 0.01 + backThickness / 2 - 0.02));
         shelfUnit.add(lip);
     }
+
+    addShelfDetails(shelfUnit, tierPositionsY, boardThickness, usableBoardWidth, usableBoardDepth, direction * (backThickness / 2 - 0.02));
 
     // High Performance: Single Compound Cannon Body for the freezer unit
     const compoundFreezerBody = new CANNON.Body({ mass: 0 });
@@ -20767,6 +20774,7 @@ function cleanupSessionResources() {
     // Null physics references (fresh world will be built on next start)
     world = null;
 
+    clearShelfDetails();
     // 6) Dispose of scene content and renderer
     try {
         if (scene) {
