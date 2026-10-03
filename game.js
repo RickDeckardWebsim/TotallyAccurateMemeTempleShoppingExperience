@@ -27,6 +27,7 @@ import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute, she
 import { addStoreWayfinding } from './src/store-signs.js';
 import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
 import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
+import { rollManagerSurvey } from './src/manager-survey.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -1005,6 +1006,9 @@ let managerFallingRefresh = 0;
 let managerObstacleSignature = '';
 const managerPlayer = { x: 0, z: 0, eyeY: 2.6, vx: 0, vz: 0 };
 let managerQuestionVisible = false;
+let managerFollowupSurvey = null;
+let managerReviewRequestVisible = false;
+let managerFollowupQuestionsAsked = 0;
 let managerSlowTimeoutId = null;
 let managerQuestionsAsked = 0;          // NEW: how many times the manager asked a question
 let managerAnsweredYes = 0;             // NEW: count of "yes" answers
@@ -1345,6 +1349,9 @@ function resetAllMechanicsState() {
     itemRemovedEventCount = 0;
     twoInOneItemCollected = false;
     managerQuestionsAsked = 0;
+    managerFollowupQuestionsAsked = 0;
+    managerFollowupSurvey = null;
+    managerReviewRequestVisible = false;
     managerAnsweredYes = 0;
     managerAnsweredNo = 0;
 
@@ -20838,6 +20845,8 @@ function cleanupSessionResources() {
     managerActive = false;
     managerQuestionVisible = false;
     managerGroup = null;
+    managerFollowupSurvey = null;
+    managerReviewRequestVisible = false;
     storeClosing = false;
     babyCrying = false;
     slipperyFloor = false;
@@ -20925,6 +20934,7 @@ function cleanupSessionResources() {
     fallingShelfOccurred = false;
     babyTantrumCount = 0;
     managerQuestionsAsked = 0;
+    managerFollowupQuestionsAsked = 0;
     managerAnsweredYes = 0;
     managerAnsweredNo = 0;
     suppressLockMessage = false;
@@ -21136,6 +21146,7 @@ function buildStatsHtml(runMetrics = null, sideQuestStats = null) {
     if (customerScuffleCount > 0) lines.push(`Customer Scuffles: ${customerScuffleCount}`);
     if (managerQuestionsAsked > 0) {
         lines.push(`Manager Questions: ${managerQuestionsAsked}`);
+        if (managerFollowupQuestionsAsked > 0) lines.push(`Manager Feedback Follow-ups: ${managerFollowupQuestionsAsked}`);
         if (managerAnsweredYes > 0) lines.push(`Manager "Yes" Answers: ${managerAnsweredYes}`);
         if (managerAnsweredNo > 0) lines.push(`Manager "No" Answers: ${managerAnsweredNo}`);
     }
@@ -21701,6 +21712,9 @@ function showManagerQuestionOverlay() {
 
     const container = document.createElement('div');
     container.id = 'manager-question';
+    container.setAttribute('role', 'dialog');
+    container.setAttribute('aria-modal', 'true');
+    container.setAttribute('aria-label', 'Manager');
     container.innerHTML = `
         <div class="manager-q-title">Manager</div>
         <div class="manager-q-badge">SUPERVISOR</div>
@@ -21716,15 +21730,20 @@ function showManagerQuestionOverlay() {
     const btnNo = document.getElementById('manager-no');
 
     btnYes.onclick = () => {
+        if (!container.isConnected) return;
         handleManagerResponse(true);
     };
     btnNo.onclick = () => {
+        if (!container.isConnected) return;
         handleManagerResponse(false);
     };
+    btnYes.focus({ preventScroll: true });
 }
 
 function hideManagerQuestionOverlay() {
     managerQuestionVisible = false;
+    managerFollowupSurvey = null;
+    managerReviewRequestVisible = false;
     gamePaused = false;
     const container = document.getElementById('manager-question');
     if (container) {
@@ -21733,6 +21752,83 @@ function hideManagerQuestionOverlay() {
 }
 
 function handleManagerResponse(isYes) {
+    // Only the original Yes/No answer rolls a survey or awards a gift. Keep the
+    // existing caught overlay and movement lock until this encounter is done.
+    if (!managerQuestionVisible || managerFollowupSurvey || managerReviewRequestVisible) return;
+    if (isYes) {
+        managerAnsweredYes += 1;
+        managerReviewRequestVisible = true;
+        showManagerReviewRequest();
+        return;
+    }
+    managerAnsweredNo += 1;
+    managerFollowupSurvey = rollManagerSurvey();
+    if (managerFollowupSurvey) {
+        showManagerFollowupQuestion();
+        return;
+    }
+    finishManagerResponse(false);
+}
+
+function showManagerFollowupQuestion() {
+    const survey = managerFollowupSurvey;
+    const container = document.getElementById('manager-question');
+    if (!managerQuestionVisible || !survey || !container) return;
+    const question = survey.questions[survey.index];
+    managerQuestionsAsked += 1;
+    managerFollowupQuestionsAsked += 1;
+    container.innerHTML = `
+        <div class="manager-q-title">Manager</div>
+        <div class="manager-q-badge">CUSTOMER FEEDBACK • ${survey.index + 1} / ${survey.questions.length}</div>
+        <p class="manager-q-aside">Just a quick question before you go...</p>
+        <p class="manager-q-text" aria-live="polite"></p>
+        <div class="manager-q-buttons manager-feedback-buttons"></div>
+    `;
+    container.querySelector('.manager-q-text').textContent = question.text;
+    const buttons = container.querySelector('.manager-q-buttons');
+    const questionIndex = survey.index;
+    question.choices.forEach(choice => {
+        const button = document.createElement('button');
+        button.className = 'manager-btn manager-btn-feedback';
+        button.textContent = choice;
+        button.onclick = () => {
+            // Detached/stale buttons and duplicate clicks can't skip a question,
+            // restart a survey or apply the initial answer's effect twice.
+            if (!managerQuestionVisible || managerFollowupSurvey !== survey || survey.index !== questionIndex || !button.isConnected) return;
+            button.disabled = true;
+            survey.index += 1;
+            if (survey.index < survey.questions.length) showManagerFollowupQuestion();
+            else finishManagerResponse(false);
+        };
+        buttons.appendChild(button);
+    });
+    buttons.firstElementChild?.focus({ preventScroll: true });
+}
+
+function showManagerReviewRequest() {
+    const container = document.getElementById('manager-question');
+    if (!managerQuestionVisible || !managerReviewRequestVisible || !container) return;
+    container.innerHTML = `
+        <div class="manager-q-title">Manager</div>
+        <div class="manager-q-badge">A FIVE-STAR SHOPPING EXPERIENCE?</div>
+        <p class="manager-q-text">Glad to hear it! Please leave a positive review on Websim for your shopping experience!</p>
+        <p class="manager-q-aside">A review is optional. You can continue shopping either way.</p>
+        <div class="manager-q-buttons manager-feedback-buttons">
+            <a class="manager-btn manager-btn-yes manager-review-link" href="https://websim.com/p/sizjke782syhrd0blowb" target="_blank" rel="noopener noreferrer">Leave a Websim review ↗</a>
+            <button id="manager-review-continue" class="manager-btn manager-btn-feedback">Continue shopping</button>
+        </div>
+    `;
+    const continueButton = container.querySelector('#manager-review-continue');
+    continueButton.onclick = () => {
+        if (!managerQuestionVisible || !managerReviewRequestVisible || !continueButton.isConnected) return;
+        managerReviewRequestVisible = false;
+        finishManagerResponse(true);
+    };
+    continueButton.focus({ preventScroll: true });
+}
+
+function finishManagerResponse(isYes) {
+    if (!managerQuestionVisible) return;
     hideManagerQuestionOverlay();
 
     // Clean up jumpscare canvas & animation
@@ -21767,7 +21863,6 @@ function handleManagerResponse(isYes) {
     finishManagerHunt(false);
 
     if (isYes) {
-        managerAnsweredYes += 1;
         // Manager gives you a random item from the shopping list
         if (shoppingList.length > 0) {
             const unfilled = shoppingList.filter(i => i.collected < i.quantity);
@@ -21786,8 +21881,8 @@ function handleManagerResponse(isYes) {
             displayMessage('The manager was pleased with you!', 3000, true);
         }
     } else {
-        managerAnsweredNo += 1;
-        // Answering no: run half as slow for 5 seconds
+        // Start the existing five-second slowdown AFTER any follow-ups, so it
+        // is not silently spent while the player is pinned in the survey.
         if (managerSlowTimeoutId) {
             try { clearTimeout(managerSlowTimeoutId); } catch (_) {}
             managerSlowTimeoutId = null;

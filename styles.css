@@ -2332,6 +2332,51 @@ button:hover {
     box-shadow: 0 6px 20px rgba(255, 23, 68, 0.65);
 }
 
+.manager-q-aside {
+    margin: 0 0 14px;
+    color: #c8b7c6;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.manager-feedback-buttons {
+    flex-direction: column;
+    gap: 10px;
+}
+
+.manager-btn-feedback {
+    background: #35283d;
+    color: #ffe1f1;
+    border: 1px solid rgba(255, 74, 168, 0.5);
+    text-transform: none;
+    letter-spacing: 0.02em;
+    white-space: normal;
+}
+
+.manager-btn-feedback:hover,
+.manager-btn-feedback:focus-visible {
+    background: #513654;
+    outline: 2px solid #ff8dcb;
+    outline-offset: 2px;
+}
+
+.manager-review-link {
+    display: block;
+    box-sizing: border-box;
+    text-decoration: none;
+    text-transform: none;
+    letter-spacing: 0.02em;
+}
+
+#manager-question:has(.manager-feedback-buttons) {
+    box-sizing: border-box;
+    width: min(460px, calc(100vw - 24px));
+    min-width: 0;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    padding: 22px;
+}
+
 /* Modern Android Smartphone Incoming Call / SMS Widget */
 #phone-call-container {
     position: absolute;
