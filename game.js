@@ -21467,7 +21467,7 @@ function showManagerWarningText() {
     warning.style.borderRadius = '16px';
     warning.style.backgroundColor = 'rgba(0, 40, 20, 0.88)';
     warning.style.border = '2px solid rgba(0, 255, 100, 0.6)';
-    warning.textContent = `MANAGER HUNT • ${Math.ceil(managerAI?.state.remaining || 15)}s • BREAK LINE OF SIGHT`;
+    warning.textContent = `MANAGER HUNT • ${Math.ceil(managerAI?.state.remaining || 30)}s • BREAK LINE OF SIGHT`;
     warning.style.color = '#ffc75f';
 
     placeEventTextElement(warning, true);

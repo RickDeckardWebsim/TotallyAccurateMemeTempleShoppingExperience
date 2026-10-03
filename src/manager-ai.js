@@ -158,9 +158,9 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
 
   return {
     state,
-    beginHunt(duration = 10 + random() * 5) {
+    beginHunt(duration = 25 + random() * 5) {
       if (state.mode !== 'patrol' || state.cooldown > 0) return false;
-      huntDuration = Math.max(10, Math.min(15, duration)); huntElapsed = 0;
+      huntDuration = Math.max(25, Math.min(30, duration)); huntElapsed = 0;
       state.remaining = huntDuration; state.mode = 'search'; state.visible = false;
       lastSeen = null; lostFor = 0; perception = 0; repath = 0; wait = 0;
       return true;
