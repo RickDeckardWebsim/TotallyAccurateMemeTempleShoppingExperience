@@ -21432,7 +21432,7 @@ function updateRoamingManager(delta) {
         managerVisionMesh.material.color.setHex(state.visible ? 0xff3c49 : 0xffb347);
         const warning = document.getElementById('manager-warning');
         if (warning) {
-            const text = `MANAGER ${state.visible ? 'CHARGING' : 'SEARCHING'} • ${Math.ceil(state.remaining)}s • ${state.visible ? 'BREAK LINE OF SIGHT!' : 'STAY OUT OF SIGHT'}`;
+            const text = `MANAGER ${state.visible ? 'CHARGING' : state.mode === 'charge' ? 'PURSUING' : 'SEARCHING'} • ${Math.ceil(state.remaining)}s • ${state.visible ? 'BREAK LINE OF SIGHT!' : state.mode === 'charge' ? 'HE REMEMBERS — KEEP HIDING!' : 'STAY OUT OF SIGHT'}`;
             if (warning.textContent !== text) warning.textContent = text;
             warning.style.color = state.visible ? '#ff6973' : '#ffc75f';
         }

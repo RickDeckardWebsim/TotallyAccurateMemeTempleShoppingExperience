@@ -4,7 +4,7 @@ import { findPath, isLineWalkable, cellToWorld, worldToCell } from './pathfindin
 
 export const MANAGER = Object.freeze({ radius: 0.48, eyeY: 2.3, height: 2.56,
   range: 19, halfFov: Math.PI * 50 / 180, patrolSpeed: 2.1, searchSpeed: 4.3,
-  chargeSpeed: 10, catchDistance: 1.15 });
+  chargeSpeed: 10, catchDistance: 1.15, pursuitMemory: 3, locationMemory: 7 });
 
 // Return first intersection fraction, or Infinity. Rotated X/Z boxes, not an
 // all-scene raycast through hundreds of products, labels and decorative meshes.
@@ -87,10 +87,12 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
   let reachable = [];
   const position = { x: spawn.x, z: spawn.z };
   const state = { position, yaw: 0, mode: 'patrol', remaining: 0, visible: false,
-    moving: false, distanceMoved: 0, cooldown: 0 };
+    moving: false, distanceMoved: 0, cooldown: 0, memoryRemaining: 0, lastKnownPosition: null };
   let path = [], pathIndex = 0, target = null, lastSeen = null;
   let repath = 0, perception = 0, wait = 0, huntElapsed = 0, huntDuration = 0;
   let lostFor = 0, scanTime = 0, scanYaw = 0;
+  const seenVelocity = { x: 0, z: 0 }, memoryTargets = [];
+  let memoryIndex = 0, memorySearchDone = false;
   const sensePeriod = 0.08;
 
   function connect() {
@@ -154,6 +156,48 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
     const d = Math.atan2(Math.sin(yaw - state.yaw), Math.cos(yaw - state.yaw));
     state.yaw += Math.max(-speed * dt, Math.min(speed * dt, d));
   }
+  function rememberSearch() {
+    // Built ONCE when sight is lost, using only the last observation. A short
+    // direction estimate and nearby shelf corners, never the hidden player's
+    // live position/velocity. Reuse the existing strict, swept-safe navigation.
+    const speed = Math.hypot(seenVelocity.x, seenVelocity.z);
+    const approachX = lastSeen.x - position.x, approachZ = lastSeen.z - position.z;
+    const approachLength = Math.hypot(approachX, approachZ) || 1;
+    const dx = speed > 0.3 ? seenVelocity.x / speed : approachX / approachLength;
+    const dz = speed > 0.3 ? seenVelocity.z / speed : approachZ / approachLength;
+    const lead = Math.min(4, speed > 0.3 ? speed * 0.7 : 2.5);
+    const projected = { x: lastSeen.x + dx * lead, z: lastSeen.z + dz * lead };
+    const candidates = [projected];
+    for (const box of boxes) {
+      if (box.maxY <= 0.06 || box.minY >= MANAGER.height || box.hx > 6 || box.hz > 6) continue;
+      const c = Math.cos(box.rot || 0), s = Math.sin(box.rot || 0);
+      const padding = MANAGER.radius + grid.cellSize * Math.SQRT1_2 + 0.35;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const lx = sx * (box.hx + padding), lz = sz * (box.hz + padding);
+        const corner = { x: box.x + lx * c + lz * s, z: box.z - lx * s + lz * c };
+        if (Math.hypot(corner.x - lastSeen.x, corner.z - lastSeen.z) <= 6) candidates.push(corner);
+      }
+    }
+    candidates.push({ x: projected.x - dz * 2.5, z: projected.z + dx * 2.5 },
+      { x: projected.x + dz * 2.5, z: projected.z - dx * 2.5 });
+    candidates.sort((a, b) => Math.hypot(a.x - projected.x, a.z - projected.z) - Math.hypot(b.x - projected.x, b.z - projected.z));
+    memoryTargets.length = 0; memoryTargets.push(nearest(lastSeen));
+    memoryIndex = 0; memorySearchDone = false;
+    for (const candidate of candidates) {
+      if (!inside(grid, candidate)) continue;
+      const point = nearest(candidate);
+      if (Math.hypot(point.x - candidate.x, point.z - candidate.z) > 1.5 ||
+          Math.hypot(point.x - lastSeen.x, point.z - lastSeen.z) > 7 ||
+          memoryTargets.some(p => Math.hypot(p.x - point.x, p.z - point.z) < 1.2)) continue;
+      memoryTargets.push(point);
+      if (memoryTargets.length >= 4) break;
+    }
+    target = memoryTargets[0]; path = []; pathIndex = 0; repath = 0; wait = 0;
+  }
+  function clearMemory() {
+    lastSeen = null; state.lastKnownPosition = null; state.memoryRemaining = 0;
+    memoryTargets.length = 0; memoryIndex = 0; memorySearchDone = false;
+  }
   connect(); Object.assign(position, nearest(spawn)); pickPatrol();
 
   return {
@@ -162,12 +206,12 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
       if (state.mode !== 'patrol' || state.cooldown > 0) return false;
       huntDuration = Math.max(25, Math.min(30, duration)); huntElapsed = 0;
       state.remaining = huntDuration; state.mode = 'search'; state.visible = false;
-      lastSeen = null; lostFor = 0; perception = 0; repath = 0; wait = 0;
+      clearMemory(); lostFor = 0; perception = 0; repath = 0; wait = 0;
       return true;
     },
     finish() {
       state.mode = 'patrol'; state.remaining = 0; state.visible = false; state.cooldown = 7;
-      lastSeen = null; lostFor = 0; wait = 0; pickPatrol();
+      clearMemory(); lostFor = 0; wait = 0; pickPatrol();
     },
     replaceBoxes(nextBoxes) {
       boxes = nextBoxes; grid = createManagerGrid(boxes); connect();
@@ -187,20 +231,29 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
       perception -= dt; repath -= dt;
       if (hunting && perception <= 0) {
         perception = sensePeriod;
+        const wasVisible = state.visible;
         state.visible = canManagerSee(position, state.yaw, player, boxes);
         if (state.visible) {
-          if (state.mode !== 'charge') repath = 0;
+          if (!wasVisible || state.mode !== 'charge') repath = 0;
           wait = 0;
           lastSeen = { x: player.x, z: player.z }; state.mode = 'charge'; lostFor = 0;
+          state.lastKnownPosition = lastSeen; state.memoryRemaining = MANAGER.locationMemory;
+          seenVelocity.x = player.vx || 0; seenVelocity.z = player.vz || 0;
+          memoryTargets.length = 0; memoryIndex = 0; memorySearchDone = false;
           // Short intercept only while actually seeing the player, and only
           // if the lead point is reachable without cutting a fixture corner.
           const lead = { x: player.x + (player.vx || 0) * 0.12, z: player.z + (player.vz || 0) * 0.12 };
           target = clearMove(player, lead) ? lead : lastSeen;
-        } else if (lastSeen) target = lastSeen;
+        } else if (wasVisible && lastSeen) rememberSearch();
       }
       if (hunting && !state.visible) {
         lostFor += dt;
-        if (lostFor > 0.45) state.mode = 'search';
+        state.memoryRemaining = lastSeen ? Math.max(0, MANAGER.locationMemory - lostFor) : 0;
+        // Brief shelf occlusion retains the charge; then investigate locally.
+        state.mode = lastSeen && lostFor < MANAGER.pursuitMemory ? 'charge' : 'search';
+        if (lastSeen && state.memoryRemaining <= 1e-6) {
+          clearMemory(); target = null; path = []; pathIndex = 0; repath = 0; wait = 0;
+        }
       }
       // Catch also needs CURRENT, unobstructed sight: no through-shelf catches,
       // and no stale 80ms perception result when the player ducks behind cover.
@@ -209,6 +262,10 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
         state.mode = 'caught'; state.visible = true; return 'caught';
       }
       const stepDt = Math.min(Math.max(dt, 0), 0.1); // No tunnelling after a slow/tab frame.
+      if (hunting && !state.visible && lastSeen && memorySearchDone) {
+        scanTime += stepDt; turn(scanYaw + Math.sin(scanTime * 2.3) * 1.1, stepDt);
+        return null;
+      }
       wait -= stepDt;
       if (wait > 0) {
         scanTime += stepDt; turn(scanYaw + Math.sin(scanTime * 2.3) * 1.1, stepDt);
@@ -231,9 +288,14 @@ export function createManagerAI({ boxes, spawn = { x: -25, z: -16 }, random = Ma
       }
       if (pathIndex >= path.length && repath > 0) {
         if (hunting && state.visible) { repath = 0; return null; }
-        if (hunting && lastSeen) { lastSeen = null; target = null; }
-        else target = null;
-        scanYaw = state.yaw; scanTime = 0; wait = hunting ? 0.5 : 0.65;
+        if (hunting && lastSeen) {
+          memoryIndex++;
+          if (memoryIndex < memoryTargets.length) {
+            target = memoryTargets[memoryIndex]; repath = 0;
+          } else { target = null; memorySearchDone = true; }
+        } else target = null;
+        scanYaw = state.yaw; scanTime = 0;
+        wait = hunting && lastSeen ? 0.18 : hunting ? 0.5 : 0.65;
       }
       return null;
     },
