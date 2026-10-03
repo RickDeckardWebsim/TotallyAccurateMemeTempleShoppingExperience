@@ -1,6 +1,6 @@
 // One roll on the original "No" answer; follow-ups never roll recursively.
 // Small authored bank, no generated text, network requests or per-frame work.
-export const MANAGER_SURVEY_CHANCE = 0.6;
+export const MANAGER_SURVEY_CHANCE = 0.8;
 export const MANAGER_FEEDBACK_QUESTIONS = Object.freeze([
   { text: 'What would make our aisles easier to shop?', choices: ['Clearer signs', 'More room for carts', 'Fewer surprise obstacles'] },
   { text: 'How could we improve the shelves?', choices: ['More readable price tags', 'Better-stocked shelves', 'Less mysterious organization'] },
