@@ -26,6 +26,7 @@ import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
 import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute, shelfFrontsReachable } from './src/store-layout.js';
 import { addStoreWayfinding } from './src/store-signs.js';
 import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
+import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -994,10 +995,17 @@ function performEventReroll() {
 // NEW: Manager jumpscare event state
 let managerActive = false;
 let managerGroup = null;
-let managerApproachActive = false;
+let managerAI = null;
+let managerVisionMesh = null;
+let managerVisionTick = 0;
+let managerStepDistance = 0;
+let managerStepSide = 0;
+let managerWalkPhase = 0;
+let managerFallingRefresh = 0;
+let managerObstacleSignature = '';
+const managerPlayer = { x: 0, z: 0, eyeY: 2.6, vx: 0, vz: 0 };
 let managerQuestionVisible = false;
 let managerSlowTimeoutId = null;
-let managerStompInterval = null;        // NEW: custom loop for overlapping stomp audio
 let managerQuestionsAsked = 0;          // NEW: how many times the manager asked a question
 let managerAnsweredYes = 0;             // NEW: count of "yes" answers
 let managerAnsweredNo = 0;              // NEW: count of "no" answers
@@ -1048,12 +1056,9 @@ function stopAllAudio() {
             mrResettiMusic.currentTime = 0;
         }
     } catch (_) {}
-    // Ensure manager stomp loop is fully stopped
+    // Ensure manager movement-driven footsteps are fully stopped
     try {
-        if (managerStompInterval) {
-            clearInterval(managerStompInterval);
-            managerStompInterval = null;
-        }
+        managerStepDistance = 0;
         if (soundEffects && soundEffects.managerStomp) {
             soundEffects.managerStomp.pause();
             soundEffects.managerStomp.currentTime = 0;
@@ -4518,6 +4523,7 @@ function createLayout5() {
 const CEILING_HEIGHT = 5.5;
 
 function createStoreLayout() {
+    clearRoamingManager();
     if (isLonelyStoreMode) {
         if (sceneLights) {
             if (sceneLights.ambientLight) {
@@ -4717,6 +4723,7 @@ function createStoreLayout() {
     if (!isLonelyStoreMode && (CONFIG.ENSURE_TWO_IN_ONE_ITEM || Math.random() * 100 < CONFIG.TWO_IN_ONE_ITEM_CHANCE)) {
         ensureTwoInOneItemExists();
     }
+    if (!isLonelyStoreMode) createRoamingManager();
 }
 
 // NEW: Define store roaming zones to spread customers naturally
@@ -11422,7 +11429,7 @@ function scheduleRandomEvents(isReroll = false) {
         { name: 'forgot_glasses', chance: CONFIG.FORGOT_GLASSES_CHANCE ?? 10, trigger: triggerForgotGlasses,
             available: () => glassesBlurRemaining <= 0, guard: () => glassesBlurRemaining <= 0,
             delay: () => isReroll ? 5000 + Math.random() * 20000 : 5000 + Math.random() * 55000 },
-        { name: 'manager_jumpscare', chance: CONFIG.MANAGER_JUMPSCARE_CHANCE ?? 8, trigger: triggerManagerJumpscare, available: () => !managerActive && !!scene && !!playerBody },
+        { name: 'manager_jumpscare', chance: CONFIG.MANAGER_JUMPSCARE_CHANCE ?? 8, trigger: triggerManagerJumpscare, available: () => !managerActive && !!managerAI && managerAI.state.cooldown <= 0 && !!scene && !!playerBody },
         { name: 'store_closing', chance: CONFIG.STORE_CLOSING_CHANCE ?? 10, trigger: triggerStoreClosing, available: () => !storeClosing },
         { name: 'baby_crying', chance: cartBaby ? 35 : (CONFIG.BABY_CRYING_CHANCE ?? 5), trigger: triggerBabyCrying, available: () => !isLonelyStoreMode && !babyCrying },
         { name: 'falling_shelf', chance: CONFIG.FALLING_SHELF_CHANCE ?? 5, trigger: triggerFallingShelfEvent, available: () => !fallingShelfTriggered && shelfUnits.length > 0 },
@@ -15517,8 +15524,6 @@ const _heldOrientation = new THREE.Quaternion();
 const _heldError = new THREE.Quaternion();
 const _heldForce = new CANNON.Vec3();
 const _heldForcePoint = new CANNON.Vec3();
-const _managerTarget = new THREE.Vector3();
-const _managerDir = new THREE.Vector3();
 const _cartDir = new THREE.Vector3();
 const _cartRight = new THREE.Vector3();
 const LONELY_BG_COLOR = new THREE.Color(0x010206);
@@ -15535,6 +15540,7 @@ function animate() {
 
     // Compute frame delta for consistent physics stepping
     const delta = clock.getDelta();
+    if (managerActive && (gameOver || isCheckout) && !managerJumpscareActive && !managerQuestionVisible) finishManagerHunt(false);
     updatePlayerCartHands();
     updateGlassesBlur(delta);
     if (Thermo.isThermostatActive()) {
@@ -16039,61 +16045,7 @@ function animate() {
         }
     }
 
-    // NEW: Manager approach movement
-    if (managerActive && managerApproachActive && managerGroup && playerBody) {
-        const target = _managerTarget.set(playerBody.position.x, 0, playerBody.position.z);
-        const pos = managerGroup.position;
-        const dir = _managerDir.subVectors(target, pos);
-        const dist = dir.length();
-        if (dist > 0.05) {
-            dir.normalize();
-            // Increased rush speed so the manager comes at you faster
-            const speed = 14; // was 8
-            pos.addScaledVector(dir, speed * delta);
-            // Face the player
-            managerGroup.lookAt(target.x, managerGroup.position.y, target.z);
-        }
-
-        // Drive stomp volume based on distance (louder as manager gets closer)
-        if (soundEffects && soundEffects.managerStomp) {
-            const maxDist = 25;
-            const t = Math.max(0, Math.min(1, dist / maxDist)); // 1 at far, 0 at close
-            const vol = (1 - t) * (CONFIG.SFX_VOLUME || 0.7);   // 0 far, full at close
-            soundEffects.managerStomp.volume = vol;
-            if (soundEffects.managerStomp2) {
-                soundEffects.managerStomp2.volume = vol;
-            }
-        }
-
-        if (dist <= 1.5 && !managerQuestionVisible && !managerJumpscareActive) {
-            managerApproachActive = false;
-            startManagerFNAFJumpscare();
-        }
-    }
-
-    // NEW: Manager flee animation
-    if (managerGroup && managerGroup.fleeing) {
-        const fleeSpeed = 14;
-        const fleeDir = {
-            x: Math.cos(managerGroup.fleeAngle),
-            z: Math.sin(managerGroup.fleeAngle)
-        };
-        managerGroup.position.x += fleeDir.x * fleeSpeed * delta;
-        managerGroup.position.z += fleeDir.z * fleeSpeed * delta;
-        managerGroup.lookAt(
-            managerGroup.position.x + fleeDir.x,
-            managerGroup.position.y,
-            managerGroup.position.z + fleeDir.z
-        );
-
-        if (Math.hypot(managerGroup.position.x, managerGroup.position.z) > 40) {
-            if (managerGroup.parent) managerGroup.parent.remove(managerGroup);
-            managerGroup = null;
-            managerActive = false;
-            stopManagerStompLoop();
-            lastMajorEventEndTime = performance.now();
-        }
-    }
+    updateRoamingManager(delta);
 
     // Update customers' positions, navigation, and generalized behaviors
     customers.forEach(child => {
@@ -20743,7 +20695,6 @@ function cleanupSessionResources() {
     try { if (checkoutBusyInterval) { clearInterval(checkoutBusyInterval); } } catch(_) {}
     try { if (powerupCountdownInterval) { clearInterval(powerupCountdownInterval); } } catch(_) {}
     try { if (customerTheftIntervalId) { clearInterval(customerTheftIntervalId); } } catch(_) {}
-    try { if (managerStompInterval) { clearInterval(managerStompInterval); managerStompInterval = null; } } catch(_) {}
 
     // 3) Cancel animation loop
     if (animationFrameId) { try { cancelAnimationFrame(animationFrameId); } catch(_) {} animationFrameId = null; }
@@ -20776,6 +20727,7 @@ function cleanupSessionResources() {
     world = null;
 
     clearShelfDetails();
+    clearRoamingManager();
     // 6) Dispose of scene content and renderer
     try {
         if (scene) {
@@ -20871,6 +20823,7 @@ function cleanupSessionResources() {
         try { jumpscareRenderer.dispose(); } catch(_) {}
         jumpscareRenderer = null;
     }
+    disposeManagerModelResources(jumpscareScene);
     jumpscareScene = null;
     jumpscareCamera = null;
     const jsCanvas = document.getElementById('jumpscare-canvas');
@@ -20883,7 +20836,6 @@ function cleanupSessionResources() {
     cancelScheduledEvents();
     powerOutage = false;
     managerActive = false;
-    managerApproachActive = false;
     managerQuestionVisible = false;
     managerGroup = null;
     storeClosing = false;
@@ -21306,48 +21258,205 @@ function showShoppingCompleteOverlay(statsHtml, bestTimeMessage = "", runMetrics
     }
 }
 
+// Cache opaque footprints instead of raycasting every product/decorative mesh.
+// Whole cabinets block sight; counters block feet but can be seen over. The
+// restroom walls/stalls come from real physics, not a magic visibility radius.
+function collectManagerObstacles() {
+    const boxes = [];
+    const offset = new CANNON.Vec3(), axis = new CANNON.Vec3();
+    const orient = new CANNON.Quaternion();
+    for (const body of world?.bodies || []) {
+        if (body.mass !== 0 || body === playerBody || !body.collisionResponse) continue;
+        // Cabinet compound shapes are replaced by one complete visual footprint.
+        if (shelfUnits.some(unit => Math.abs(unit.position.x - body.position.x) < 0.01 &&
+            Math.abs(unit.position.z - body.position.z) < 0.01 && Math.abs(body.position.y - 2.4) < 0.01)) continue;
+        for (let i = 0; i < body.shapes.length; i++) {
+            const shape = body.shapes[i];
+            if (!(shape instanceof CANNON.Box)) continue;
+            body.quaternion.vmult(body.shapeOffsets[i], offset);
+            body.quaternion.mult(body.shapeOrientations[i], orient);
+            orient.vmult(new CANNON.Vec3(1, 0, 0), axis);
+            const box = { x: body.position.x + offset.x, z: body.position.z + offset.z,
+                hx: shape.halfExtents.x, hz: shape.halfExtents.z,
+                minY: body.position.y + offset.y - shape.halfExtents.y,
+                maxY: body.position.y + offset.y + shape.halfExtents.y,
+                rot: Math.atan2(-axis.z, axis.x) };
+            if (Math.abs(box.x) > 38 || Math.abs(box.z) > 38 || box.minY > MANAGER.height || box.maxY <= 0.06) continue;
+            boxes.push(box);
+        }
+    }
+    const bounds = new THREE.Box3();
+    for (const unit of shelfUnits) {
+        // Includes the swing of freezer doors and the wider footprint of a
+        // toppled shelf. Box3 is refreshed only during a moving fixture event.
+        unit.updateWorldMatrix(true, true);
+        bounds.setFromObject(unit);
+        boxes.push({ x: (bounds.min.x + bounds.max.x) / 2, z: (bounds.min.z + bounds.max.z) / 2,
+            hx: (bounds.max.x - bounds.min.x) / 2, hz: (bounds.max.z - bounds.min.z) / 2,
+            minY: bounds.min.y, maxY: bounds.max.y, rot: 0 });
+    }
+    return boxes;
+}
+
+function disposeManagerModelResources(root) {
+    if (!root) return;
+    const geometries = new Set(), materials = new Set();
+    root.traverse(node => {
+        if (node.geometry) geometries.add(node.geometry);
+        if (Array.isArray(node.material)) node.material.forEach(mat => materials.add(mat));
+        else if (node.material) materials.add(node.material);
+    });
+    geometries.forEach(geometry => geometry.dispose());
+    materials.forEach(material => material.dispose());
+}
+
+function clearRoamingManager() {
+    stopManagerStompLoop();
+    hideManagerWarningText();
+    if (managerGroup) {
+        managerGroup.removeFromParent();
+        disposeManagerModelResources(managerGroup);
+    }
+    if (managerVisionMesh) {
+        managerVisionMesh.removeFromParent();
+        managerVisionMesh.geometry.dispose(); managerVisionMesh.material.dispose();
+    }
+    managerGroup = null; managerAI = null; managerVisionMesh = null;
+    managerActive = false;
+    managerVisionTick = 0; managerStepDistance = 0; managerWalkPhase = 0; managerFallingRefresh = 0;
+    managerObstacleSignature = '';
+}
+
+function createRoamingManager() {
+    // Private RNG stream: patrol destinations don't consume gameplay event rolls.
+    let seed = (Math.random() * 0xffffffff) >>> 0;
+    const random = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 0x100000000;
+    };
+    managerAI = createManagerAI({ boxes: collectManagerObstacles(), random });
+    managerGroup = createManagerModel();
+    managerGroup.position.set(managerAI.state.position.x, 0, managerAI.state.position.z);
+    scene.add(managerGroup);
+    // One low-poly floor fan; no light/shadow, added physics or product raycasts.
+    const segments = 24, positions = new Float32Array((segments + 2) * 3), indices = [];
+    for (let i = 1; i <= segments; i++) indices.push(0, i, i + 1);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setIndex(indices);
+    managerVisionMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0xffb347,
+        transparent: true, opacity: 0.13, depthWrite: false, side: THREE.DoubleSide }));
+    managerVisionMesh.frustumCulled = false; managerVisionMesh.visible = false;
+    managerVisionMesh.raycast = () => {}; // Never masks item/interaction raycasts.
+    scene.add(managerVisionMesh);
+}
+
+function finishManagerHunt(escaped) {
+    if (managerAI && managerAI.state.mode !== 'patrol') managerAI.finish();
+    managerActive = false;
+    hideManagerWarningText(); stopManagerStompLoop();
+    if (managerVisionMesh) managerVisionMesh.visible = false;
+    lastMajorEventEndTime = performance.now();
+    if (escaped) {
+        displayMessage('You avoided the manager. He has gone back to his rounds.', 3500, true);
+        logRunEvent('👔 Escaped the manager hunt');
+    }
+}
+
+function updateRoamingManager(delta) {
+    if (!managerAI || !managerGroup || !playerBody) return;
+    const suspended = !gameStarted || gamePaused || isCheckout || gameOver || introCutsceneActive ||
+        isUiPopupOpen() || managerJumpscareActive || managerQuestionVisible || SQ.isCinematic() || Nuke.isNukeActive() || isBeingArrested;
+    if (suspended) {
+        stopManagerStompLoop();
+        if (managerVisionMesh) managerVisionMesh.visible = false;
+        return;
+    }
+    // Low-frequency refresh only when a fixture changes shape. Door changes are
+    // represented by the cabinet envelope; moving/fallen shelves also need nav.
+    managerFallingRefresh -= delta;
+    if (managerFallingRefresh <= 0) {
+        managerFallingRefresh = 0.2;
+        const signature = allFreezerDoors.map(door => Math.round(door.currentAngle * 20)).join(',') +
+            `/${Math.round((bathroomStallDoor?.angle || 0) * 20)}/${fallingShelfAnim ? Math.round(Math.min(1, (performance.now() - fallingShelfAnim.start) / fallingShelfAnim.duration) * 20) : -1}`;
+        if (signature !== managerObstacleSignature) {
+            managerAI.replaceBoxes(collectManagerObstacles());
+            managerObstacleSignature = signature;
+        }
+    }
+    managerPlayer.x = playerBody.position.x; managerPlayer.z = playerBody.position.z;
+    managerPlayer.eyeY = camera?.position.y ?? 2.6;
+    managerPlayer.vx = playerBody.velocity.x; managerPlayer.vz = playerBody.velocity.z;
+    const result = managerAI.update(delta, managerPlayer), state = managerAI.state;
+    managerGroup.position.set(state.position.x, 0, state.position.z);
+    managerGroup.rotation.y = state.yaw;
+    managerWalkPhase += state.distanceMoved * 5;
+    const stride = state.moving ? Math.sin(managerWalkPhase) : 0;
+    const legs = managerGroup.userData.walkLegs;
+    legs[0].position.z = stride * 0.16; legs[1].position.z = -stride * 0.16;
+    if (result === 'escaped') { finishManagerHunt(true); return; }
+    if (result === 'caught') {
+        if (managerVisionMesh) managerVisionMesh.visible = false;
+        startManagerFNAFJumpscare(); return;
+    }
+    const distance = Math.hypot(managerPlayer.x - state.position.x, managerPlayer.z - state.position.z);
+    managerStepDistance += state.distanceMoved;
+    if (managerStepDistance >= (state.mode === 'charge' ? 1.8 : 1.1)) {
+        managerStepDistance = 0;
+        const sound = managerStepSide++ % 2 ? soundEffects?.managerStomp2 : soundEffects?.managerStomp;
+        if (sound && distance < 35) {
+            sound.pause(); sound.currentTime = 0;
+            sound.playbackRate = state.mode === 'charge' ? 1.2 : 0.95;
+            sound.volume = (CONFIG.SFX_VOLUME ?? 0.7) * (managerActive ? 0.9 : 0.24) * Math.max(0, 1 - distance / 35);
+            sound.setPosition?.(state.position.x, 0.3, state.position.z);
+            sound.play().catch(() => {});
+        }
+    }
+    managerVisionMesh.visible = managerActive;
+    if (!managerActive) return;
+    managerVisionTick -= delta;
+    if (managerVisionTick <= 0) {
+        managerVisionTick = 0.1;
+        const attr = managerVisionMesh.geometry.attributes.position;
+        attr.setXYZ(0, state.position.x, 0.028, state.position.z);
+        const segments = attr.count - 2;
+        for (let i = 0; i <= segments; i++) {
+            const angle = state.yaw - MANAGER.halfFov + i / segments * MANAGER.halfFov * 2;
+            const point = { x: state.position.x + Math.sin(angle) * MANAGER.range,
+                z: state.position.z + Math.cos(angle) * MANAGER.range };
+            const t = sightFraction(state.position, point, managerAI.boxes);
+            attr.setXYZ(i + 1, state.position.x + (point.x - state.position.x) * t,
+                0.028, state.position.z + (point.z - state.position.z) * t);
+        }
+        attr.needsUpdate = true;
+        managerVisionMesh.material.color.setHex(state.visible ? 0xff3c49 : 0xffb347);
+        const warning = document.getElementById('manager-warning');
+        if (warning) {
+            const text = `MANAGER ${state.visible ? 'CHARGING' : 'SEARCHING'} • ${Math.ceil(state.remaining)}s • ${state.visible ? 'BREAK LINE OF SIGHT!' : 'STAY OUT OF SIGHT'}`;
+            if (warning.textContent !== text) warning.textContent = text;
+            warning.style.color = state.visible ? '#ff6973' : '#ffc75f';
+        }
+    }
+}
+
 function triggerManagerJumpscare() {
-    if (managerActive || !scene || !playerBody || !gameStarted || isCheckout || gameOver) return false;
+    if (managerActive || !managerAI || !scene || !playerBody || !gameStarted || isCheckout || gameOver || isLonelyStoreMode) return false;
+    if (!managerAI.beginHunt()) return false;
     managerActive = true;
     managerJumpscareOccurred = true;
-
-    // NEW: Show warning text immediately (2 seconds before manager spawns)
     showManagerWarningText();
-
-    // NEW: Delay actual manager spawn and approach by 2 seconds
-    const spawnTimerId = setTimeout(() => {
-        if (!managerActive || !scene || !playerBody || !gameStarted || isCheckout || gameOver) {
-            managerActive = false;
-            return;
-        }
-
-        // Create manager model near the edge of the store, aimed at the player
-        managerGroup = createManagerModel();
-        const spawnRadius = 25;
-        const angle = Math.random() * Math.PI * 2;
-        const sx = Math.cos(angle) * spawnRadius;
-        const sz = Math.sin(angle) * spawnRadius;
-        managerGroup.position.set(sx, 0, sz);
-        scene.add(managerGroup);
-
-        // Start manager stomp loop quietly; volume will ramp as he approaches
-        startManagerStompLoop();
-
-        managerApproachActive = true;
-    }, 2000);
-    scheduledEventTimeouts.push(spawnTimerId);
+    managerVisionTick = 0;
     return true;
 }
 
 function showManagerWarningText() {
     // Remove any existing warning
-    const existing = document.getElementById('manager-warning');
-    if (existing) removeEventTextElement(existing);
+    hideManagerWarningText();
 
     const warning = document.createElement('div');
     warning.id = 'manager-warning';
     warning.className = 'event-text-banner manager-warning-banner';
-    warning.style.fontSize = '2.2em';
+    warning.style.fontSize = 'clamp(16px, 2.3vw, 26px)';
     warning.style.fontWeight = 'bold';
     warning.style.textAlign = 'center';
     warning.style.zIndex = '2005';
@@ -21358,26 +21467,12 @@ function showManagerWarningText() {
     warning.style.borderRadius = '16px';
     warning.style.backgroundColor = 'rgba(0, 40, 20, 0.88)';
     warning.style.border = '2px solid rgba(0, 255, 100, 0.6)';
-    warning.textContent = 'THE MANAGER IS COMING';
+    warning.textContent = `MANAGER HUNT • ${Math.ceil(managerAI?.state.remaining || 15)}s • BREAK LINE OF SIGHT`;
+    warning.style.color = '#ffc75f';
 
     placeEventTextElement(warning, true);
     document.getElementById('alerts-overlay').appendChild(warning);
 
-    // Blink animation: alternate between green and pink every 450ms
-    let isGreen = true;
-    const blinkInterval = setInterval(() => {
-        if (!warning || !warning.parentNode) {
-            clearInterval(blinkInterval);
-            return;
-        }
-        isGreen = !isGreen;
-        warning.style.color = isGreen ? '#00ff66' : '#ff1493';
-        warning.style.backgroundColor = isGreen ? 'rgba(0, 40, 20, 0.88)' : 'rgba(50, 0, 30, 0.88)';
-        warning.style.borderColor = isGreen ? 'rgba(0, 255, 100, 0.6)' : 'rgba(255, 20, 147, 0.6)';
-    }, 450);
-
-    // Store interval ID for cleanup
-    warning.blinkInterval = blinkInterval;
 }
 
 function hideManagerWarningText() {
@@ -21409,6 +21504,7 @@ function createManagerModel() {
     const rightLeg = new THREE.Mesh(legGeom, legMat);
     rightLeg.position.set(0.18, legHeight / 2, 0);
     g.add(leftLeg, rightLeg);
+    g.userData.walkLegs = [leftLeg, rightLeg];
 
     // Torso (bright pink shirt)
     const torsoGeom = new THREE.CylinderGeometry(0.35, 0.3, torsoHeight, 16);
@@ -21652,6 +21748,7 @@ function handleManagerResponse(isYes) {
         // Keep the canvas paired with its WebGL renderer for subsequent rolls.
         jsCanvas.style.display = 'none';
     }
+    disposeManagerModelResources(jumpscareScene);
     jumpscareScene = null;
     jumpscareCamera = null;
 
@@ -21665,28 +21762,9 @@ function handleManagerResponse(isYes) {
     }
     managerJumpscareActive = false;
 
-    // Position in-world manager directly in front of player facing away to flee
-    if (playerBody && camera) {
-        const camDir = new THREE.Vector3();
-        camera.getWorldDirection(camDir);
-        camDir.y = 0;
-        if (camDir.lengthSq() > 0.001) camDir.normalize();
-        else camDir.set(0, 0, -1);
-
-        if (managerGroup) {
-            managerGroup.visible = true;
-            managerGroup.position.set(
-                playerBody.position.x + camDir.x * 1.5,
-                0,
-                playerBody.position.z + camDir.z * 1.5
-            );
-            managerGroup.fleeAngle = Math.atan2(-camDir.z, -camDir.x);
-            managerGroup.fleeDist = 0;
-            managerGroup.fleeing = true;
-            managerApproachActive = false;
-            startManagerStompLoop();
-        }
-    }
+    // Return to the same in-world position, then walk away normally. No teleport.
+    if (managerGroup) managerGroup.visible = true;
+    finishManagerHunt(false);
 
     if (isYes) {
         managerAnsweredYes += 1;
@@ -21723,16 +21801,6 @@ function handleManagerResponse(isYes) {
         }, 5000);
     }
 
-    // Manager disappears after 5 seconds of fleeing
-    setTimeout(() => {
-        stopManagerStompLoop();
-        if (managerGroup && managerGroup.parent) {
-            managerGroup.parent.remove(managerGroup);
-        }
-        managerGroup = null;
-        managerActive = false;
-    }, 5000);
-
     // Resume controls if still in gameplay
     if (gameStarted && !isCheckout && !gameOver) {
         suppressLockMessage = true;
@@ -21740,40 +21808,9 @@ function handleManagerResponse(isYes) {
     }
 }
 
-// NEW: Manager stomp audio helpers: overlapping, slightly faster loop
-function startManagerStompLoop() {
-    if (!soundEffects || !soundEffects.managerStomp) return;
-    if (managerStompInterval) return;
-    let toggle = 0;
-    managerStompInterval = setInterval(() => {
-        try {
-            const s = toggle === 0 ? soundEffects.managerStomp : soundEffects.managerStomp2 || soundEffects.managerStomp;
-            toggle = 1 - toggle;
-            if (!s) return;
-            s.pause();
-            s.currentTime = 0;
-            s.playbackRate = 1.2; // a little faster than normal
-            
-            // NEW: Adjust volume based on distance if manager is fleeing
-            let vol = (CONFIG.SFX_VOLUME || 0.7);
-            if (managerGroup && managerGroup.fleeing && playerBody) {
-                const dist = managerGroup.position.distanceTo(playerBody.position);
-                const maxDist = 35; // fade out completely at this distance
-                const t = Math.max(0, Math.min(1, dist / maxDist));
-                vol = vol * (1 - t); // Decrease volume as distance increases
-            }
-            s.volume = vol;
-            s.play();
-        } catch (_) {}
-    }, 180); // short interval so stomps overlap slightly
-}
-
 function stopManagerStompLoop() {
+    managerStepDistance = 0;
     try {
-        if (managerStompInterval) {
-            clearInterval(managerStompInterval);
-            managerStompInterval = null;
-        }
         if (soundEffects && soundEffects.managerStomp) {
             soundEffects.managerStomp.pause();
             soundEffects.managerStomp.currentTime = 0;

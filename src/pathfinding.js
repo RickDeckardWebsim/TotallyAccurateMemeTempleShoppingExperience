@@ -220,8 +220,9 @@ const NEIGHBORS = [
 ];
 
 // Fast A* Pathfinding (binary-heap open set)
-export function findPath(grid, start, goal) {
+export function findPath(grid, start, goal, { strict = false, smoothingRadius = 0.3 } = {}) {
   if (!grid || !grid.walkable) {
+    if (strict) return [];
     return [{ x: goal.x, z: goal.z }];
   }
 
@@ -333,6 +334,7 @@ export function findPath(grid, start, goal) {
   }
 
   if (!found) {
+    if (strict) return [];
     // If no complete path to exact goal, return direct clamped goal
     return [{ x: goalPt.x, z: goalPt.z }];
   }
@@ -351,5 +353,19 @@ export function findPath(grid, start, goal) {
   path.reverse();
 
   // Apply smooth string-pulling so agents walk smoothly without grid artifacts
-  return smoothPath(grid, path);
+  return smoothingRadius === 0.3 ? smoothPath(grid, path) : smoothPathWithRadius(grid, path, smoothingRadius);
+}
+
+function smoothPathWithRadius(grid, path, radius) {
+  const result = [path[0]];
+  for (let i = 0; i < path.length - 1;) {
+    let next = i + 1;
+    for (let j = next + 1; j < path.length; j++) {
+      if (!isLineWalkable(grid, path[i].x, path[i].z, path[j].x, path[j].z, radius)) break;
+      next = j;
+    }
+    result.push(path[next]);
+    i = next;
+  }
+  return result;
 }

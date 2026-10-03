@@ -90,12 +90,12 @@ export function loadSounds({ musicMuted = false } = {}) {
   // Add a funny slap SFX (cartoony squeak)
   soundEffects.slap = createSound('slap.mp3'); soundEffects.slap.volume = CONFIG.SFX_VOLUME;
 
-  // NEW: Manager stomp loop (starts when manager appears, stops at question)
-  // Use two instances so we can overlap them for a denser, faster stomp feel.
-  soundEffects.managerStomp = createSound('STOMP2.ogg');
+  // Manager footsteps follow actual movement and are directional in the store.
+  // Two shared voices overlap without creating sounds per frame.
+  soundEffects.managerStomp = createSound('STOMP2.ogg', { spatial: { refDistance: 3, maxDistance: 35 } });
   soundEffects.managerStomp.loop = false;
   soundEffects.managerStomp.volume = 0;
-  soundEffects.managerStomp2 = createSound('STOMP2.ogg');
+  soundEffects.managerStomp2 = createSound('STOMP2.ogg', { spatial: { refDistance: 3, maxDistance: 35 } });
   soundEffects.managerStomp2.loop = false;
   soundEffects.managerStomp2.volume = 0;
 
