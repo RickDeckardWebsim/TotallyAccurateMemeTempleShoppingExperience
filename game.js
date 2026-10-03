@@ -27,7 +27,7 @@ import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute, she
 import { addStoreWayfinding } from './src/store-signs.js';
 import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
 import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
-import { rollManagerSurvey } from './src/manager-survey.js';
+import { rollManagerSurvey, answerManagerSurvey, advanceManagerSurvey, getManagerFeedbackPenalty } from './src/manager-survey.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
@@ -1009,6 +1009,8 @@ let managerQuestionVisible = false;
 let managerFollowupSurvey = null;
 let managerReviewRequestVisible = false;
 let managerFollowupQuestionsAsked = 0;
+let managerFeedbackCorrect = 0;
+let managerFeedbackWrong = 0;
 let managerSlowTimeoutId = null;
 let managerQuestionsAsked = 0;          // NEW: how many times the manager asked a question
 let managerAnsweredYes = 0;             // NEW: count of "yes" answers
@@ -1350,8 +1352,11 @@ function resetAllMechanicsState() {
     twoInOneItemCollected = false;
     managerQuestionsAsked = 0;
     managerFollowupQuestionsAsked = 0;
+    managerFeedbackCorrect = 0;
+    managerFeedbackWrong = 0;
     managerFollowupSurvey = null;
     managerReviewRequestVisible = false;
+    clearManagerSlowdown();
     managerAnsweredYes = 0;
     managerAnsweredNo = 0;
 
@@ -20847,6 +20852,7 @@ function cleanupSessionResources() {
     managerGroup = null;
     managerFollowupSurvey = null;
     managerReviewRequestVisible = false;
+    clearManagerSlowdown();
     storeClosing = false;
     babyCrying = false;
     slipperyFloor = false;
@@ -20935,6 +20941,8 @@ function cleanupSessionResources() {
     babyTantrumCount = 0;
     managerQuestionsAsked = 0;
     managerFollowupQuestionsAsked = 0;
+    managerFeedbackCorrect = 0;
+    managerFeedbackWrong = 0;
     managerAnsweredYes = 0;
     managerAnsweredNo = 0;
     suppressLockMessage = false;
@@ -21147,6 +21155,7 @@ function buildStatsHtml(runMetrics = null, sideQuestStats = null) {
     if (managerQuestionsAsked > 0) {
         lines.push(`Manager Questions: ${managerQuestionsAsked}`);
         if (managerFollowupQuestionsAsked > 0) lines.push(`Manager Feedback Follow-ups: ${managerFollowupQuestionsAsked}`);
+        if (managerFeedbackCorrect + managerFeedbackWrong > 0) lines.push(`Manager Feedback: ${managerFeedbackCorrect} correct / ${managerFeedbackWrong} wrong`);
         if (managerAnsweredYes > 0) lines.push(`Manager "Yes" Answers: ${managerAnsweredYes}`);
         if (managerAnsweredNo > 0) lines.push(`Manager "No" Answers: ${managerAnsweredNo}`);
     }
@@ -21718,7 +21727,8 @@ function showManagerQuestionOverlay() {
     container.innerHTML = `
         <div class="manager-q-title">Manager</div>
         <div class="manager-q-badge">SUPERVISOR</div>
-        <p class="manager-q-text">Are you enjoying your experience today?</p>
+        <p class="manager-q-aside">There you are. A quick satisfaction check before you go.</p>
+        <p class="manager-q-text">Are you enjoying your shopping experience today?</p>
         <div class="manager-q-buttons">
             <button id="manager-yes" class="manager-btn manager-btn-yes">Yes</button>
             <button id="manager-no" class="manager-btn manager-btn-no">No</button>
@@ -21780,29 +21790,55 @@ function showManagerFollowupQuestion() {
     container.innerHTML = `
         <div class="manager-q-title">Manager</div>
         <div class="manager-q-badge">CUSTOMER FEEDBACK • ${survey.index + 1} / ${survey.questions.length}</div>
-        <p class="manager-q-aside">Just a quick question before you go...</p>
+        <p class="manager-q-aside">Unhappy? Help me fix it. Listen to the problem, then choose the answer that solves it.</p>
         <p class="manager-q-text" aria-live="polite"></p>
         <div class="manager-q-buttons manager-feedback-buttons"></div>
     `;
     container.querySelector('.manager-q-text').textContent = question.text;
     const buttons = container.querySelector('.manager-q-buttons');
     const questionIndex = survey.index;
-    question.choices.forEach(choice => {
+    question.choices.forEach((choice, choiceIndex) => {
         const button = document.createElement('button');
         button.className = 'manager-btn manager-btn-feedback';
-        button.textContent = choice;
+        button.textContent = choice.text;
         button.onclick = () => {
             // Detached/stale buttons and duplicate clicks can't skip a question,
             // restart a survey or apply the initial answer's effect twice.
             if (!managerQuestionVisible || managerFollowupSurvey !== survey || survey.index !== questionIndex || !button.isConnected) return;
             button.disabled = true;
-            survey.index += 1;
-            if (survey.index < survey.questions.length) showManagerFollowupQuestion();
-            else finishManagerResponse(false);
+            const feedback = answerManagerSurvey(survey, choiceIndex);
+            if (!feedback) return;
+            if (feedback.correct) managerFeedbackCorrect += 1;
+            else managerFeedbackWrong += 1;
+            showManagerFollowupResult(survey, questionIndex, feedback);
         };
         buttons.appendChild(button);
     });
     buttons.firstElementChild?.focus({ preventScroll: true });
+}
+
+function showManagerFollowupResult(survey, questionIndex, feedback) {
+    const container = document.getElementById('manager-question');
+    if (!managerQuestionVisible || managerFollowupSurvey !== survey || !container) return;
+    const buttons = container.querySelector('.manager-q-buttons');
+    buttons.replaceChildren();
+    const response = document.createElement('p');
+    response.className = `manager-feedback-response ${feedback.correct ? 'manager-feedback-correct' : 'manager-feedback-wrong'}`;
+    response.setAttribute('role', 'status');
+    response.textContent = `${feedback.correct ? 'Good answer.' : 'Wrong answer.'} “${feedback.reply}”`;
+    const consequence = document.createElement('p');
+    consequence.className = 'manager-q-aside';
+    consequence.textContent = `His mood: ${feedback.mood}. Current slowdown penalty: ${Math.round((1 - feedback.speedMultiplier) * 100)}% for ${(feedback.durationMs / 1000).toFixed(1)}s after this conversation. ${feedback.anger > 0 && survey.index + 1 < survey.questions.length ? 'A correct answer next can calm him down.' : ''}`;
+    const nextButton = document.createElement('button');
+    nextButton.className = 'manager-btn manager-btn-feedback';
+    nextButton.textContent = survey.index + 1 < survey.questions.length ? 'Next question' : 'Let me get back to shopping';
+    nextButton.onclick = () => {
+        if (!managerQuestionVisible || managerFollowupSurvey !== survey || survey.index !== questionIndex || !nextButton.isConnected || !survey.awaitingContinue) return;
+        if (advanceManagerSurvey(survey)) showManagerFollowupQuestion();
+        else finishManagerResponse(false);
+    };
+    buttons.append(response, consequence, nextButton);
+    nextButton.focus({ preventScroll: true });
 }
 
 function showManagerReviewRequest() {
@@ -21811,7 +21847,7 @@ function showManagerReviewRequest() {
     container.innerHTML = `
         <div class="manager-q-title">Manager</div>
         <div class="manager-q-badge">A FIVE-STAR SHOPPING EXPERIENCE?</div>
-        <p class="manager-q-text">Glad to hear it! Please leave a positive review on Websim for your shopping experience!</p>
+        <p class="manager-q-text">Excellent. Tell Websim we earned your approval! Please leave a positive review for your shopping experience.</p>
         <p class="manager-q-aside">A review is optional. You can continue shopping either way.</p>
         <div class="manager-q-buttons manager-feedback-buttons">
             <a class="manager-btn manager-btn-yes manager-review-link" href="https://websim.com/p/sizjke782syhrd0blowb" target="_blank" rel="noopener noreferrer">Leave a Websim review ↗</a>
@@ -21827,8 +21863,19 @@ function showManagerReviewRequest() {
     continueButton.focus({ preventScroll: true });
 }
 
+function clearManagerSlowdown() {
+    if (managerSlowTimeoutId !== null) {
+        try { clearTimeout(managerSlowTimeoutId); } catch (_) {}
+        managerSlowTimeoutId = null;
+    }
+    currentMoveSpeed = CONFIG.MOVE_SPEED;
+}
+
 function finishManagerResponse(isYes) {
     if (!managerQuestionVisible) return;
+    // Snapshot the score before closing the dialog clears its session state.
+    const survey = managerFollowupSurvey;
+    const penalty = getManagerFeedbackPenalty(survey?.correctAnswers, survey?.wrongAnswers);
     hideManagerQuestionOverlay();
 
     // Clean up jumpscare canvas & animation
@@ -21881,19 +21928,19 @@ function finishManagerResponse(isYes) {
             displayMessage('The manager was pleased with you!', 3000, true);
         }
     } else {
-        // Start the existing five-second slowdown AFTER any follow-ups, so it
-        // is not silently spent while the player is pinned in the survey.
-        if (managerSlowTimeoutId) {
-            try { clearTimeout(managerSlowTimeoutId); } catch (_) {}
-            managerSlowTimeoutId = null;
-        }
-        currentMoveSpeed = CONFIG.MOVE_SPEED * 0.5;
-        displayMessage('The manager was disappointed and you feel yourself moving slower...', 4500, true);
+        // Start after the last reply, not while pinned. Good answers retain the
+        // old 50%/5s consequence; mistakes smoothly increase both strength and time.
+        clearManagerSlowdown();
+        currentMoveSpeed = CONFIG.MOVE_SPEED * penalty.speedMultiplier;
+        const verdict = !survey ? '“Noted. I am still disappointed. Take five seconds to reflect.”' :
+            penalty.anger === 0 ? '“At least you listened. Take five seconds to reflect.”' :
+            penalty.anger < 1 ? '“Some of that was useful. The rest tried my patience.”' : '“You did not listen to a word I said. Take your time leaving.”';
+        displayMessage(`${verdict} Moving ${Math.round((1 - penalty.speedMultiplier) * 100)}% slower for ${(penalty.durationMs / 1000).toFixed(1)}s.`, 4500, true);
         managerSlowTimeoutId = setTimeout(() => {
             currentMoveSpeed = CONFIG.MOVE_SPEED;
             managerSlowTimeoutId = null;
             displayMessage('You feel back up to your normal speed.', 3000);
-        }, 5000);
+        }, penalty.durationMs);
     }
 
     // Resume controls if still in gameplay

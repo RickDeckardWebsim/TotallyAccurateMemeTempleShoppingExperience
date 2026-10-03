@@ -2368,6 +2368,19 @@ button:hover {
     letter-spacing: 0.02em;
 }
 
+.manager-feedback-response {
+    margin: 0;
+    padding: 12px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    font-size: 0.98rem;
+    line-height: 1.45;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.manager-feedback-correct { color: #91f0bd; }
+.manager-feedback-wrong { color: #ff989d; }
+
 #manager-question:has(.manager-feedback-buttons) {
     box-sizing: border-box;
     width: min(460px, calc(100vw - 24px));
