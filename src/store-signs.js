@@ -32,7 +32,7 @@ export function addStoreWayfinding(scene, shelfUnits, ceilingHeight, registerCul
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = info.color; ctx.fillRect(0, 0, 512, 160);
         ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = 'bold 44px Arial'; ctx.fillText(`AISLE ${info.aisle}`, 256, 43);
+        ctx.font = 'bold 44px Arial'; ctx.fillText(`SECTION ${info.aisle}`, 256, 43);
         ctx.font = 'bold 28px Arial'; ctx.fillText(info.label, 256, 96, 475);
         ctx.font = '18px Arial'; ctx.fillText('MIXED STOCK - CHECK EVERY TIER', 256, 138, 475);
         const texture = new THREE.CanvasTexture(canvas);
@@ -60,22 +60,4 @@ export function addStoreWayfinding(scene, shelfUnits, ceilingHeight, registerCul
         });
     });
 
-    // Entrance directory lists only departments/aisles actually present.
-    const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#202c30'; ctx.fillRect(0, 0, 512, 512);
-    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 34px Arial'; ctx.fillText('MAGMART DIRECTORY', 24, 54);
-    ctx.font = '22px Arial'; ctx.fillStyle = '#b7c3c7'; ctx.fillText('Section hints - stock stays mixed', 24, 88);
-    aisles.forEach((info, i) => {
-        const y = 130 + i * 57;
-        ctx.fillStyle = info.color; ctx.fillRect(24, y - 18, 8, 36);
-        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 24px Arial';
-        ctx.fillText(`${info.aisle}  ${info.label}`, 44, y + 7, 442);
-    });
-    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 2.8), new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }));
-    board.rotation.y = Math.PI;
-    board.position.set(-8, 2.9, -29.55);
-    scene.add(board); registerCullable(board, 3);
 }

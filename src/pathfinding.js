@@ -1,6 +1,6 @@
 // High-performance 2D Grid A* Pathfinding with Line-of-Sight Smoothing and Obstacle Clearance
 
-export function buildNavGrid({ shelfUnits = [], constructionZones = [], sampleBooths = [], bounds = { minX: -28, maxX: 28, minZ: -28, maxZ: 28 }, cellSize = 0.5, margin = 0.55 }) {
+export function buildNavGrid({ shelfUnits = [], constructionZones = [], sampleBooths = [], bounds = { minX: -28, maxX: 28, minZ: -28, maxZ: 28 }, cellSize = 0.5, margin = 0.55, computeClearance = true }) {
   const minX = bounds.minX, maxX = bounds.maxX, minZ = bounds.minZ, maxZ = bounds.maxZ;
   const cols = Math.floor((maxX - minX) / cellSize) + 1;
   const rows = Math.floor((maxZ - minZ) / cellSize) + 1;
@@ -67,6 +67,9 @@ export function buildNavGrid({ shelfUnits = [], constructionZones = [], sampleBo
       }
     }
   }
+
+  // Startup placement checks only need connectivity, not the A* preference field.
+  if (!computeClearance) return { minX, maxX, minZ, maxZ, cellSize, cols, rows, walkable, clearance };
 
   // 5. Compute simple clearance field (for path preference away from sharp shelf corners)
   for (let r = 0; r < rows; r++) {

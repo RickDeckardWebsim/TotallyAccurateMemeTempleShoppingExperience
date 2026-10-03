@@ -23,7 +23,7 @@ import { applyCartFinish, applyCartSkin } from './src/cart-skins.js';
 import { buildCartQuarterSlot } from './src/cart-quarter-slot.js';
 import * as CartPhys from './src/cart-physics.js';
 import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
-import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute } from './src/store-layout.js';
+import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute, shelfFrontsReachable } from './src/store-layout.js';
 import { addStoreWayfinding } from './src/store-signs.js';
 import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
 import { dressCustomer } from './src/customer-skins.js';
@@ -4650,7 +4650,7 @@ function createStoreLayout() {
     // Add exterior scenery (parking lot, trees, and cars) in front of the store entrance
     createExteriorScenery();
 
-    // Create shelves using structured aisle positions
+    // Create shuffled, staggered shelf bays with independent compass facings.
     shelves = [];
     shelfUnits = [];
     freezerUnits = [];
@@ -4685,8 +4685,8 @@ function createStoreLayout() {
     positions.forEach((pos, idx) => {
         if (shelvesCreated >= targetShelfCount) return;
         const skipItemsOnThisShelf = (idx === emptyShelfIndex);
-        // The per-shelf replacement rolls are retained; group their fixtures in
-        // cold storage before creating bodies, doors and world-space stock.
+        // Keep the pre-rolled fixture type and mixed stock unchanged, with only
+        // a soft section preference for cold storage and other departments.
         const isReplaced = pos.isFreezer;
         let unit;
         if (isReplaced) {
@@ -17766,7 +17766,7 @@ function createFreeSampleBooth() {
         }
         return constructionZones.every(zone =>
             Math.abs(x - zone.position.x) > 5.6 || Math.abs(z - zone.position.z) > 5.6
-        );
+        ) && shelfFrontsReachable(shelfUnits, constructionZones, [...sampleBooths, { position: { x, z } }]);
     };
 
     let spot;
@@ -17932,7 +17932,7 @@ function maybeCreateUnderConstructionZone() {
 
     // Roll a side pocket, not a bottleneck across an aisle or the entrance.
     // Keep the existing event chance and a full 7x7 barrier footprint.
-    const candidates = [-7.5, 7.5].flatMap(x => [-9, 1, 11, 21].map(z => ({ x, z })));
+    const candidates = [-16, -7.5, 7.5, 16].flatMap(x => [-8, -2.9, 2.2, 7.3, 12.4, 17.5, 22.6].map(z => ({ x, z })));
     shuffleArray(candidates);
     let chosen = null;
 
@@ -17959,6 +17959,7 @@ function maybeCreateUnderConstructionZone() {
             }
         }
 
+        if (!shelfFrontsReachable(shelfUnits, [...constructionZones, { position: { x, z }, radius: 3.5 }], sampleBooths)) continue;
         chosen = { x, z };
         break;
     }
