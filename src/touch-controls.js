@@ -136,6 +136,13 @@ function init() {
         const action = btn.dataset.key;
         btn.addEventListener('touchstart', (e) => {
             e.preventDefault(); e.stopPropagation();
+            // Dedicated touch buttons remain usable in either desktop scheme.
+            if (action === 'cart' || action === 'slap') {
+                T()?.relock();
+                T()?.[action]?.();
+                navigator.vibrate?.(8);
+                return;
+            }
             const c = code(action);
             held.set(btn, c);
             btn.classList.add('down');
@@ -155,12 +162,9 @@ function init() {
         btn.addEventListener('touchcancel', up, { passive: false });
     });
 
-    let listPage = 1;
     root.querySelector('[data-list]').addEventListener('touchstart', (e) => {
         e.preventDefault(); e.stopPropagation();
-        listPage = listPage === 1 ? 2 : 1;
-        const c = 'Digit' + listPage;
-        key('keydown', c); key('keyup', c);
+        T()?.switchList?.();
     }, { passive: false });
 
     const releaseAll = () => {

@@ -9,7 +9,6 @@ export const DEFAULT_KEYBINDS = {
     jump: 'Space',
     cart: 'KeyF',
     slap: 'KeyR',
-    mute: 'KeyM',
     pause: 'Escape',
     powerup: 'KeyY',
     useMouse: 'Tab'
@@ -29,6 +28,8 @@ export const DEFAULT_GAME_SETTINGS = {
     SHOW_FPS: false,               // Show FPS overlay
     HIDE_CONTROLS_GUIDE: false,    // Hide controls box in game
     HIDE_BEST_TIMES: false,
+    SIMPLIFIED_CONTROLS: true,
+    POPUP_MODE: 'reduced',        // 'full' | 'reduced' | 'none'; gameplay dialogs remain available
     KEYBINDS: { ...DEFAULT_KEYBINDS }
 };
 

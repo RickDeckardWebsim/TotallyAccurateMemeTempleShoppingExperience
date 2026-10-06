@@ -30,7 +30,9 @@ import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
 import { rollManagerSurvey, answerManagerSurvey, advanceManagerSurvey, getManagerFeedbackPenalty } from './src/manager-survey.js';
 import { dressCustomer } from './src/customer-skins.js';
 import { createNotificationCooldown } from './src/notification-cooldown.js';
+import { shouldShowNotification } from './src/notification-policy.js';
 import { createCustomerAscensions, detectCustomerFlight } from './src/customer-ascension.js';
+import { rollPlayerHeaven, createPlayerHeaven } from './src/player-heaven.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
 import { createRunSeed, RULESET_KEYS, vanillaRulesetValue } from './src/run-seed.js';
@@ -487,6 +489,8 @@ let purchaseComplete = false;
 let paidListSnapshot = null;     // grocery list frozen at the moment of purchase
 let purchaseWrongItemsCount = 0; // wrong items evaluated at purchase time
 let activeListPage = 'grocery';  // 'grocery' | 'other' (keys 1 / 2)
+let playerHeaven = null;
+let playerHeavenRestore = null;
 let playerCarSpots = [];         // nearby empty stalls for the player's car
 let bathroomToilet = null;
 // Track Falling Shelf event state
@@ -801,7 +805,7 @@ try {
         musicMuted = (savedMuted === 'true');
     }
 } catch (_) {}
-// All sound on/off: the main menu's speaker button and Settings > Sound (music alone: the mute key, M)
+// All sound on/off: the speaker button and Settings > Sound; ♪ controls music alone.
 watchHiddenBottom(); // (websim's phone layout hides the bottom of the game's frame)
 let audioMuted = false;
 try { audioMuted = localStorage.getItem('audioMuted') === 'true'; } catch (_) {}
@@ -869,6 +873,8 @@ function isMajorEventActive() {
 
 function placeEventTextElement(element, preferredIsCenter = true) {
     if (!element) return;
+    element.dataset.notificationBanner = element.id === 'power-outage-banner' ? 'routine' : 'important';
+    element.hidden = !shouldShowNotification(CONFIG.POPUP_MODE, element.textContent, element.dataset.notificationBanner);
     element.style.position = 'relative';
     element.style.top = 'auto';
     element.style.left = 'auto';
@@ -894,7 +900,7 @@ function cancelScheduledEvents(clearAlerts = false) {
 }
 
 function showLonelyStoreOminousEventNotif() {
-    if (mainMenuVisible || !isLonelyStoreMode || isCheckout || gameOver) return;
+    if (CONFIG.POPUP_MODE !== 'full' || playerHeaven || gamePaused || mainMenuVisible || !isLonelyStoreMode || isCheckout || gameOver) return;
 
     if (soundEffects && soundEffects.textChime) {
         try {
@@ -1198,6 +1204,7 @@ function setMusicMuted(muted) {
     musicMuted = !!muted;
     try { localStorage.setItem('musicMuted', String(musicMuted)); } catch (_) {}
     applyMusicMute();
+    updateMusicButtonIcon();
 }
 // Pause every music track except `keep` (only one song at a time).
 function pauseOtherMusic(keep) {
@@ -3989,7 +3996,6 @@ export const DEFAULT_KEYBINDS = {
     jump: 'Space',
     cart: 'KeyF',
     slap: 'KeyR',
-    mute: 'KeyM',
     pause: 'Escape',
     powerup: 'KeyY',
     useMouse: 'Tab'
@@ -4027,14 +4033,13 @@ function updateControlsGuideDisplay() {
         <h3>Controls</h3>
         <p>${formatKeyName(kb.forward)}/${formatKeyName(kb.left)}/${formatKeyName(kb.backward)}/${formatKeyName(kb.right)} - Move</p>
         <p>Mouse - Look</p>
-        <p>${formatKeyName(kb.interact)} - Grab/Release items</p>
+        <p>${formatKeyName(kb.interact)} - Items${CONFIG.SIMPLIFIED_CONTROLS ? ' / Cart (look at it)' : ''}</p>
         <p>${formatKeyName(kb.jump)} - Jump</p>
-        <p>${formatKeyName(kb.cart)} - Attach/Detach Cart</p>
-        <p>${formatKeyName(kb.mute)} - Mute/Unmute Music</p>
+        ${CONFIG.SIMPLIFIED_CONTROLS ? '' : `<p>${formatKeyName(kb.cart)} - Attach/Detach Cart</p>`}
         <p>${formatKeyName(kb.pause)} - Pause</p>
-        <p>${formatKeyName(kb.slap)} - Slap</p>
-        <p>${formatKeyName(kb.useMouse || 'Tab')} - Use Mouse</p>
-        <p>1/2 - Grocery / Other list</p>
+        <p>${CONFIG.SIMPLIFIED_CONTROLS ? 'Click customer' : formatKeyName(kb.slap)} - Slap</p>
+        <p>${formatKeyName(kb.useMouse || 'Tab')} - Mouse / Music ♪ / Settings</p>
+        <p>${CONFIG.SIMPLIFIED_CONTROLS ? 'Scroll' : '1/2'} - To Get / To Do</p>
     `;
 }
 updateControlsGuideDisplay();
@@ -4048,6 +4053,18 @@ muteBtn.id = 'mute-toggle';
 muteBtn.setAttribute('aria-label', 'Sound on/off');
 muteBtn.textContent = '🔊';
 document.getElementById('game-container').appendChild(muteBtn);
+
+const musicBtn = document.createElement('button');
+musicBtn.id = 'music-toggle';
+musicBtn.onclick = () => setMusicMuted(!musicMuted);
+document.getElementById('game-container').appendChild(musicBtn);
+function updateMusicButtonIcon() {
+    musicBtn.textContent = musicMuted ? '♪̸' : '♪';
+    musicBtn.title = musicMuted ? 'Turn music on' : 'Mute music';
+    musicBtn.setAttribute('aria-label', musicBtn.title);
+    musicBtn.setAttribute('aria-pressed', String(musicMuted));
+}
+updateMusicButtonIcon();
 
 function playUIButtonSound(name) {
     const source = UI_SOUNDS[name]; // (made with the page, so the main menu has them too)
@@ -11138,12 +11155,81 @@ function handleSmoothMouseMove(event) {
 
 let pointerdownHandler = null;
 let pointerupHandler = null;
+let wheelHandler = null;
+
+function gameplayInputReady(allowQuestInput = false) {
+    return !playerHeaven && gameStarted && !gameOver && !isCheckout && !gamePaused && !mainMenuVisible &&
+        !introCutsceneActive && !tweakerRequestOpen && controls?.isLocked && !Nuke.isWorldFrozen() && (allowQuestInput || !SQ.isMovementLocked());
+}
+
+function togglePlayerCart() {
+    const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
+    const key = formatKeyName(CONFIG.SIMPLIFIED_CONTROLS ? kb.interact : kb.cart);
+    if (cartAttached) {
+        cartAttached = false;
+        playCartHandleSound();
+        displayMessage(`Detached from cart. Look at it and press ${key} to push it again.`, 2200);
+    } else if (canInteractWithCart()) {
+        cartAttached = true;
+        playCartHandleSound();
+        displayMessage('Attached to shopping cart!', 1500);
+    } else {
+        displayMessage(`Get closer to your shopping cart to attach! (Press ${key})`, 1800);
+    }
+}
+
+// Test against static physics, not every decorative mesh. Doors and shelf backs
+// block contextual actions; the wire cart and other shoppers do not block sight.
+function contextTargetVisible(point, distance) {
+    let blocked = false;
+    const from = new CANNON.Vec3(camera.position.x, camera.position.y, camera.position.z);
+    const to = new CANNON.Vec3(point.x, point.y, point.z);
+    world.raycastAll(from, to, { skipBackfaces: true }, result => {
+        if (result.body.type === CANNON.Body.STATIC && result.body.collisionResponse && result.distance < distance - 0.08) blocked = true;
+    });
+    return !blocked;
+}
+
+function aimedPlayerCart() {
+    if (!cart3D || !canInteractWithCart()) return false;
+    camera.getWorldPosition(sharedRaycaster.ray.origin);
+    camera.getWorldDirection(sharedRaycaster.ray.direction);
+    const hit = sharedRaycaster.intersectObject(cart3D, true)[0];
+    const item = findAccessibleItemUnderCrosshair(sharedRaycaster, CONFIG.ARM_REACH * 1.8);
+    if (hit && item && !item.inCart) {
+        const itemHit = sharedRaycaster.intersectObject(item.mesh, true)[0];
+        if (itemHit && itemHit.distance < hit.distance) return false;
+    }
+    return !!hit && hit.distance <= 4.2 && contextTargetVisible(hit.point, hit.distance);
+}
+
+function contextualSlapTarget() {
+    if (heldItem || hoveredFreezerDoor || wifeCallRinging || SQ.capturesClick() || SQ.isMovementLocked()) return null;
+    const hit = findCustomerUnderCrosshair();
+    if (!hit || !contextTargetVisible(hit.point, hit.distance)) return null;
+    const item = findAccessibleItemUnderCrosshair(sharedRaycaster, CONFIG.ARM_REACH * 1.8);
+    if (item) {
+        const itemHit = sharedRaycaster.intersectObject(item.mesh, true)[0];
+        if (itemHit && itemHit.distance < hit.distance) return null;
+    }
+    return hit;
+}
+
+function trySlap() {
+    const now = Date.now();
+    if (now - lastSlapAt < SLAP_COOLDOWN_MS) return;
+    lastSlapAt = now;
+    performSlap();
+}
 
 // ---- Touch controls bridge (used by src/touch-controls.js) ----
 const touchMove = { x: 0, y: 0 }; // x: strafe (-1 left..1 right), y: forward (-1 back..1 fwd)
 window.__touch = {
     enabled: TOUCH_MODE,
     keybinds() { return { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) }; },
+    cart() { if (gameplayInputReady()) togglePlayerCart(); },
+    slap() { if (gameplayInputReady()) trySlap(); },
+    switchList() { if (gameplayInputReady()) setListPage(activeListPage === 'grocery' ? 'other' : 'grocery'); },
     move(x, y) { touchMove.x = x; touchMove.y = y; },
     look(dx, dy) {
         const k = 1.9;
@@ -11177,6 +11263,7 @@ function setupEvents() {
     if (pointerdownHandler && renderer?.domElement) { try { renderer.domElement.removeEventListener('pointerdown', pointerdownHandler); } catch(_) {} }
     if (pointerupHandler) { try { window.removeEventListener('pointerup', pointerupHandler); } catch(_) {} }
     if (smoothMouseMoveHandler) { try { document.removeEventListener('mousemove', smoothMouseMoveHandler); } catch(_) {} }
+    if (wheelHandler) { try { document.removeEventListener('wheel', wheelHandler); } catch(_) {} }
 
     smoothMouseMoveHandler = handleSmoothMouseMove;
     document.addEventListener('mousemove', smoothMouseMoveHandler, { passive: true });
@@ -11218,6 +11305,7 @@ function setupEvents() {
 
     // Click to start game OR relock pointer if game already started
     rendererClickHandler = (event) => {
+        if (playerHeaven) return;
         if (event?.button !== undefined && event.button !== 0) return;
         if (introCutsceneActive) {
             finishIntroCutscene(true);
@@ -11230,11 +11318,15 @@ function setupEvents() {
         }
         if (!gameStarted && !gameOver && !mainMenuVisible) {
             startGame();
-        } else if (gameStarted && !isCheckout && !gamePaused && !tweakerRequestOpen && controls && !controls.isLocked) {
+        } else if (gameStarted && !gameOver && !isCheckout && !gamePaused && !tweakerRequestOpen && controls && !controls.isLocked) {
             try { controls.lock(); } catch (_) {}
-        } else if (gameStarted && !isCheckout && !gamePaused && controls && controls.isLocked) {
+        } else if (gameplayInputReady()) {
             if (Nuke.isWorldFrozen()) return;
             if (SQ.capturesClick() || SQ.isMovementLocked()) return;
+            if (CONFIG.SIMPLIFIED_CONTROLS && contextualSlapTarget()) {
+                trySlap();
+                return;
+            }
             if (!heldItem) {
                 grabItem();
             } else {
@@ -11244,12 +11336,21 @@ function setupEvents() {
     };
     renderer?.domElement.addEventListener('click', rendererClickHandler);
 
+    wheelHandler = event => {
+        if (!CONFIG.SIMPLIFIED_CONTROLS || !gameplayInputReady() || !SQ.sideQuestsEnabled() || !event.deltaY || event.ctrlKey) return;
+        event.preventDefault();
+        // Directional pages also work with smooth trackpads without flip-flopping.
+        setListPage(event.deltaY > 0 ? 'other' : 'grocery');
+    };
+    document.addEventListener('wheel', wheelHandler, { passive: false });
+
     // Handle keyboard input
     const keyState = {};
     clearHeldKeys = () => Object.keys(keyState).forEach(k => (keyState[k] = false));
     let lastEActionTime = 0;
 
     keydownHandler = (event) => {
+        if (playerHeaven) return;
         if (introCutsceneActive) {
             if (event.code === 'Space' || event.code === 'Escape' || event.code === 'KeyE' || event.code === 'Enter') {
                 finishIntroCutscene(true);
@@ -11262,9 +11363,9 @@ function setupEvents() {
 
         // Handle jumping with configured key
         const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
-        if (event.code === kb.jump && SQ.onJump()) {
+        if (gameplayInputReady(true) && event.code === kb.jump && SQ.onJump()) {
             // consumed by a side quest (e.g. stepping away from the returns desk)
-        } else if (event.code === kb.jump && playerBody && playerBody.position.y < 1.1 && !SQ.isMovementLocked()) {
+        } else if (gameplayInputReady() && event.code === kb.jump && playerBody && playerBody.position.y < 1.1) {
             playerBody.velocity.y = 3.5;
             const originalGravityY = world.gravity.y;
             world.gravity.y = -CONFIG.GRAVITY * 1.8;
@@ -11284,18 +11385,23 @@ function setupEvents() {
         }
 
         // Flip between the grocery list and the other-tasks paper
-        if (gameStarted && !gameOver && (event.code === 'Digit1' || event.code === 'Numpad1')) setListPage('grocery');
-        if (gameStarted && !gameOver && (event.code === 'Digit2' || event.code === 'Numpad2')) setListPage('other');
+        if (!CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() && (event.code === 'Digit1' || event.code === 'Numpad1')) setListPage('grocery');
+        if (!CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() && (event.code === 'Digit2' || event.code === 'Numpad2')) setListPage('other');
 
         // Side-quest interactions (toilet, info desk, samples, customers, car) come first
-        if (event.code === kb.interact && gameStarted && !isCheckout && !gamePaused && SQ.onInteractDown(event)) return;
+        const cartInteract = event.code === kb.interact && CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() &&
+            !heldItem && !SQ.capturesClick() && aimedPlayerCart();
+        if (event.code === kb.interact && gameplayInputReady(true) && !cartInteract && SQ.onInteractDown(event)) return;
 
         // Interact behavior: grab item, take item from cart, or drop/place into cart
-        if (event.code === kb.interact && gameStarted && !isCheckout) {
+        if (event.code === kb.interact && gameplayInputReady() && !event.repeat) {
             if (now - lastEActionTime < 250) return;
             lastEActionTime = now;
             if (tryCollectLooseMoney()) {
                 // Money on the crosshair takes priority.
+            } else if (cartInteract) {
+                // Looking into an attached cart detaches before taking groceries.
+                togglePlayerCart();
             } else if (!heldItem) {
                 grabItem();
             } else {
@@ -11306,30 +11412,12 @@ function setupEvents() {
         if (event.code === kb.pause) {
             togglePause();
         }
-        if (event.code === kb.cart && !SQ.isMovementLocked()) {
-            if (cartAttached) {
-                cartAttached = false;
-                playCartHandleSound();
-                displayMessage(`Detached from cart. You can now grab items off shelves! (Press ${formatKeyName(kb.cart)} to push cart)`, 2200);
-            } else {
-                if (canInteractWithCart()) {
-                    cartAttached = true;
-                    playCartHandleSound();
-                    displayMessage("Attached to shopping cart!", 1500);
-                } else {
-                    displayMessage(`Get closer to your shopping cart to attach! (Press ${formatKeyName(kb.cart)})`, 1800);
-                }
-            }
-        }
-        if (event.code === kb.mute) {
-            setMusicMuted(!musicMuted);
-            displayMessage(musicMuted ? "Music muted" : "Music unmuted", 2000);
-        }
+        if (!CONFIG.SIMPLIFIED_CONTROLS && event.code === kb.cart && gameplayInputReady() && !event.repeat) togglePlayerCart();
         if (event.code === kb.powerup && gameStarted && !powerupUsed && currentPowerup && !powerupActive) {
             activateCurrentPowerup();
         }
         // Use Mouse keybind toggle
-        if (event.code === kb.useMouse) {
+        if (event.code === kb.useMouse && gameStarted && !isCheckout && !gameOver && !gamePaused) {
             event.preventDefault();
             if (gameStarted && !isCheckout && !gameOver && !gamePaused) {
                 if (controls && controls.isLocked) {
@@ -11340,12 +11428,7 @@ function setupEvents() {
             }
         }
         // Slap mechanic
-        if (event.code === kb.slap && gameStarted && !isCheckout && !gamePaused && controls?.isLocked) {
-            if (now - lastSlapAt >= SLAP_COOLDOWN_MS) {
-                lastSlapAt = now;
-                performSlap();
-            }
-        }
+        if (!CONFIG.SIMPLIFIED_CONTROLS && event.code === kb.slap && gameplayInputReady() && !event.repeat) trySlap();
     };
     document.addEventListener('keydown', keydownHandler);
 
@@ -12257,7 +12340,7 @@ function scheduleShoppingListUpdates() {
     if (isLonelyStoreMode) return;
     if (addItemIntervalId) clearInterval(addItemIntervalId);
     addItemIntervalId = setInterval(() => {
-        if (!gameStarted || isCheckout || gameOver || isLonelyStoreMode || purchaseComplete) return;
+        if (playerHeaven || !gameStarted || isCheckout || gameOver || isLonelyStoreMode || purchaseComplete) return;
         if (Math.random() * 100 < CONFIG.ADD_ITEM_CHANCE) {
             addItemToShoppingList();
         }
@@ -12265,7 +12348,7 @@ function scheduleShoppingListUpdates() {
 
     if (removeItemIntervalId) clearInterval(removeItemIntervalId);
     removeItemIntervalId = setInterval(() => {
-        if (!gameStarted || isCheckout || gameOver || isLonelyStoreMode || purchaseComplete || shoppingList.length <= 1) return;
+        if (playerHeaven || !gameStarted || isCheckout || gameOver || isLonelyStoreMode || purchaseComplete || shoppingList.length <= 1) return;
         if (Math.random() * 100 < CONFIG.REMOVE_ITEM_CHANCE) {
             removeItemFromShoppingList();
         }
@@ -12782,6 +12865,7 @@ function hideCustomerInteractionMessage() {
 }
 
 function resumeGame() {
+    if (playerHeaven) return;
     gamePaused = false;
     if (document.getElementById('trunk-loading')) return;
     if (controls && !controls.isLocked) {
@@ -12790,6 +12874,7 @@ function resumeGame() {
 }
 
 function togglePause() {
+    if (playerHeaven) return;
     gamePaused = !gamePaused;
 
     if (gamePaused) {
@@ -12854,8 +12939,9 @@ function displayRngNotification(message, duration = 3500) {
     displayMessage(message, duration, true);
 }
 
-function displayMessage(message, duration = 2400, isRngEvent = false, isAllowedInLonelyStore = false, isOminous = false) {
-    if (mainMenuVisible || !message) return;
+function displayMessage(message, duration = 2400, isRngEvent = false, isAllowedInLonelyStore = false, isOminous = false, importance = 'auto') {
+    if (playerHeaven || mainMenuVisible || !message) return;
+    if (!shouldShowNotification(CONFIG.POPUP_MODE, message, importance)) return;
     if (isLonelyStoreMode && !isAllowedInLonelyStore) return;
     if (Nuke.isWorldFrozen()) return;
     const overlay = document.getElementById('alerts-overlay');
@@ -12891,7 +12977,7 @@ function displayMessage(message, duration = 2400, isRngEvent = false, isAllowedI
 
     const showDuration = Math.max(1800, duration || 2400);
 
-    const entry = { el, timerId: null };
+    const entry = { el, timerId: null, message, importance };
     entry.timerId = setTimeout(() => {
         el.classList.add('leaving');
         setTimeout(() => {
@@ -13175,7 +13261,8 @@ function grabItem() {
                     soundEffects.wrongItem.play();
                 }
             } catch(_) {}
-            displayMessage("Detach from your cart to take items out! (Press F)", 2200, true);
+            const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
+            displayMessage(`Detach from your cart to take items out! (Look at cart; press ${formatKeyName(CONFIG.SIMPLIFIED_CONTROLS ? kb.interact : kb.cart)})`, 2200, true);
             return;
         }
 
@@ -13997,6 +14084,7 @@ function triggerStoreClosing() {
     // Start countdown
     if (storeClosingInterval) { try { clearInterval(storeClosingInterval); } catch(_) {} }
     storeClosingInterval = setInterval(() => {
+        if (playerHeaven) return;
         storeClosingTimer--;
 
         if (storeClosingTimer <= 0) {
@@ -15642,6 +15730,19 @@ function animate() {
 
     // Compute frame delta for consistent physics stepping
     const delta = clock.getDelta();
+    if (playerHeaven) {
+        const state = playerHeaven.update(delta, camera.aspect);
+        if (state?.phase === 'rising') {
+            camera.position.y = state.y;
+            playerBody.position.y = playerHeavenRestore.position.y + state.y - playerHeavenRestore.cameraPosition.y;
+            playerBody.aabbNeedsUpdate = true;
+            camera.rotation.x = Math.min(0.7, camera.rotation.x + delta * 0.3);
+            renderer.render(scene, camera);
+        } else if (playerHeaven.scene) {
+            renderer.render(playerHeaven.scene, playerHeaven.camera);
+        }
+        return;
+    }
     if (managerActive && (gameOver || isCheckout) && !managerJumpscareActive && !managerQuestionVisible) finishManagerHunt(false);
     updatePlayerCartHands();
     updateGlassesBlur(delta);
@@ -15753,17 +15854,19 @@ function animate() {
                     if (isClosedFreezer) {
                         hoveredItemName = `❄️ ${it.name} (Pull freezer door open to reach!)`;
                     } else if (it.inCart) {
-                        hoveredItemName = cartAttached ? `${it.name} (In Cart — Detach [F] to take out)` : `${it.name} (In Cart) [E / Click]`;
+                        const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
+                        hoveredItemName = cartAttached ? `${it.name} (In Cart — Detach [${formatKeyName(CONFIG.SIMPLIFIED_CONTROLS ? kb.interact : kb.cart)}] to take out)` : `${it.name} (In Cart) [E / Click]`;
                     } else {
                         hoveredItemName = `${it.name} [E / Click]`;
                     }
                 }
             }
-            if (!hoveredItemName && !cartAttached && cart3D) {
+            if (!hoveredItemName && cart3D) {
                 const cartHits = raycaster.intersectObject(cart3D, true);
                 if (cartHits.length > 0 && cartHits[0].distance <= 3.8) {
-                    const cKey = formatKeyName((CONFIG.KEYBINDS && CONFIG.KEYBINDS.cart) || 'KeyF');
-                    hoveredItemName = `🛒 Shopping Cart [Press ${cKey} to Push]`;
+                    const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
+                    const cKey = formatKeyName(CONFIG.SIMPLIFIED_CONTROLS ? kb.interact : kb.cart);
+                    hoveredItemName = `🛒 Shopping Cart [${cKey} to ${cartAttached ? 'Detach' : 'Push'}]`;
                 }
             }
             if (!hoveredItemName && leaderboardStandGroup) {
@@ -15773,6 +15876,7 @@ function animate() {
                 }
             }
             if (!hoveredItemName) hoveredItemName = SQ.getHoverText();
+            if (CONFIG.SIMPLIFIED_CONTROLS && contextualSlapTarget()) hoveredItemName = 'Customer [Click to slap • E to interact]';
             const aimedMoney = aimedLooseMoney(raycaster);
             if (aimedMoney) hoveredItemName = `$${(aimedMoney.cents / 100).toFixed(2)} [E to save]`;
             if (heldItem) hoveredItemName = `${heldItem.name} [Click to toss • E to place]`;
@@ -16771,6 +16875,7 @@ function animate() {
             if (onSpill && !playerOnSpill) {
                 playerOnSpill = true;
                 unlockAchievement('slip');
+                if (rollPlayerHeaven() && beginPlayerHeaven()) return;
                 displayMessage("Oops, slippery spill! Moving slower here.", 2500);
                 if (Math.random() < dropAllItemsOnSpillChance) {
                     triggerTrip();
@@ -19341,6 +19446,8 @@ function performSaveSettings() {
     CONFIG.MUSIC_VOLUME = mv; CONFIG.SFX_VOLUME = sv;
     const soundOn = document.getElementById('sound-on');
     if (soundOn) setAudioMuted(!soundOn.checked);
+    const musicOn = document.getElementById('music-on');
+    if (musicOn) setMusicMuted(!musicOn.checked);
     if (menuMusic) menuMusic.volume = mv;
     if (music) music.volume = mv * (1 - customerScuffleMusicMix);
     if (customerScuffleMusic) customerScuffleMusic.volume = mv * customerScuffleMusicMix;
@@ -19377,6 +19484,22 @@ function performSaveSettings() {
     CONFIG.HIDE_BEST_TIMES = !!hideBestTimesCheck?.checked;
     scoreboardElement.style.display = CONFIG.HIDE_BEST_TIMES ? 'none' : '';
     CONFIG.KEYBINDS = { ...currentSettingsKeybinds };
+    delete CONFIG.KEYBINDS.mute;
+    CONFIG.SIMPLIFIED_CONTROLS = document.getElementById('simplified-controls')?.checked !== false;
+    CONFIG.POPUP_MODE = document.getElementById('popup-mode')?.value || 'reduced';
+    if (CONFIG.POPUP_MODE !== 'full') document.getElementById('theft-alert-overlay')?.classList.add('hidden');
+    if (CONFIG.POPUP_MODE !== 'full') document.getElementById('lonely-ominous-banner')?.remove();
+    document.querySelectorAll('[data-notification-banner]').forEach(el => {
+        el.hidden = !shouldShowNotification(CONFIG.POPUP_MODE, el.textContent, el.dataset.notificationBanner);
+    });
+    for (let i = activeToastsList.length - 1; i >= 0; i--) {
+        const entry = activeToastsList[i];
+        if (!shouldShowNotification(CONFIG.POPUP_MODE, entry.message, entry.importance)) {
+            clearTimeout(entry.timerId);
+            entry.el.remove();
+            activeToastsList.splice(i, 1);
+        }
+    }
     updateControlsGuideDisplay();
 
     persistUserSettings();
@@ -19402,6 +19525,21 @@ function populateSettingsMenu() {
     if (sfxSlider) sfxSlider.value = CONFIG.SFX_VOLUME ?? 0.7;
     const soundOnCheck = document.getElementById('sound-on');
     if (soundOnCheck) soundOnCheck.checked = !audioMuted;
+    const musicOnCheck = document.getElementById('music-on');
+    if (musicOnCheck) musicOnCheck.checked = !musicMuted;
+    const simpleCheck = document.getElementById('simplified-controls');
+    if (simpleCheck) simpleCheck.checked = CONFIG.SIMPLIFIED_CONTROLS !== false;
+    const popupSelect = document.getElementById('popup-mode');
+    if (popupSelect) popupSelect.value = CONFIG.POPUP_MODE || 'reduced';
+    const syncClassicKeybinds = () => {
+        document.querySelectorAll('.keybind-btn[data-action="cart"], .keybind-btn[data-action="slap"]').forEach(btn => {
+            btn.disabled = !!simpleCheck?.checked;
+            btn.title = simpleCheck?.checked ? 'Turn off Simplified controls to customize this classic key' : '';
+            btn.parentElement.classList.toggle('classic-only', !!simpleCheck?.checked);
+        });
+    };
+    if (simpleCheck) simpleCheck.onchange = syncClassicKeybinds;
+    syncClassicKeybinds();
     if (lightingSelect) lightingSelect.value = (CONFIG.LIGHTING_QUALITY || 'high');
     if (pbrSelect) pbrSelect.value = (CONFIG.PBR_QUALITY || 'high');
     if (qSelect) qSelect.value = (CONFIG.RENDER_QUALITY || 'medium');
@@ -20664,10 +20802,62 @@ function canInteractWithCart() {
 }
 
 // NEW: Spill trip check helpers
+function beginPlayerHeaven() {
+    if (playerHeaven || !gameplayInputReady() || isUiPopupOpen() || Nuke.isNukeActive() ||
+        wifeCallRinging || managerJumpscareActive || customerQuestionInProgress || isBeingArrested) return false;
+    const candidates = ACTIVE_ITEMS.filter(template => allItems.some(item => item.name === template.name && item.mesh));
+    if (!candidates.length) return false;
+    const template = candidates[Math.floor(Math.random() * candidates.length)];
+    const original = allItems.find(item => item.name === template.name && item.mesh);
+    // Clone the display only: groceries, collection counts and physics stay intact.
+    const itemModel = original.mesh.clone(true);
+    itemModel.position.set(0, 0, 0); itemModel.rotation.set(0, 0, 0); itemModel.visible = true;
+    itemModel.traverse(node => { node.visible = true; node.frustumCulled = false; node.castShadow = false; });
+    playerHeavenRestore = { position: playerBody.position.clone(), cameraPosition: camera.position.clone(),
+        yaw: cameraTargetYaw, pitch: cameraTargetPitch };
+    stopSpillTripCheckForPlayer();
+    clearHeldKeys(); touchMove.x = touchMove.y = 0;
+    cartAttached = false;
+    playerBody.velocity.set(0, 0, 0);
+    gamePaused = true;
+    controls?.unlock();
+    setMuted(true);
+    document.getElementById('game-container').classList.add('heaven-active');
+    logRunEvent('👼 Slipped into heaven');
+    playerHeaven = createPlayerHeaven({ THREE, ceilingHeight: CEILING_HEIGHT,
+        cameraStartY: camera.position.y, itemName: template.name, itemModel,
+        parent: document.getElementById('game-container'), volume: CONFIG.SFX_VOLUME ?? 0.7, muted: audioMuted,
+        onReturn: returnFromPlayerHeaven,
+        onMenu: () => { hardStopGame(); stopMenuMusic(); stopFailMusic(); showMainMenu(); }
+    });
+    return true;
+}
+
+function returnFromPlayerHeaven() {
+    if (!playerHeaven || !playerHeavenRestore) return;
+    const restore = playerHeavenRestore;
+    clearPlayerHeaven();
+    playerBody.position.copy(restore.position); playerBody.velocity.set(0, 0, 0);
+    playerBody.aabbNeedsUpdate = true; playerBody.wakeUp();
+    camera.position.copy(restore.cameraPosition);
+    syncCameraAngles(restore.yaw, restore.pitch);
+    uiFreezePos = null; clearHeldKeys();
+    gamePaused = false;
+    if (playerOnSpill) startSpillTripCheckForPlayer();
+    suppressLockMessage = true;
+    try { controls.lock(); } catch (_) {}
+}
+
+function clearPlayerHeaven() {
+    playerHeaven?.dispose(); playerHeaven = null; playerHeavenRestore = null;
+    document.getElementById('game-container')?.classList.remove('heaven-active');
+    setMuted(audioMuted);
+}
+
 function startSpillTripCheckForPlayer() {
     stopSpillTripCheckForPlayer();
     spillTripIntervalPlayer = setInterval(() => {
-        if (!playerOnSpill) return;
+        if (!playerOnSpill || gamePaused || gameOver || isCheckout || playerHeaven) return;
         // 1-in-3 chance each second; only when cart is attached
         if (cartAttached && Math.random() < (1/3)) {
             triggerTrip();
@@ -20730,6 +20920,7 @@ function persistUserSettings() {
         'LOOK_SENSITIVITY',
         'HIDE_CONTROLS_GUIDE',
         'HIDE_BEST_TIMES',
+        'SIMPLIFIED_CONTROLS', 'POPUP_MODE',
         'KEYBINDS',
         'CUSTOMER_THEFT_CHANCE',
         // NEW: Under construction zone chance
@@ -20754,6 +20945,7 @@ function detachAllEventHandlers() {
     try {
         if (keydownHandler) { document.removeEventListener('keydown', keydownHandler); keydownHandler = null; }
         if (keyupHandler) { document.removeEventListener('keyup', keyupHandler); keyupHandler = null; }
+        if (wheelHandler) { document.removeEventListener('wheel', wheelHandler); wheelHandler = null; }
         if (windowBlurHandler) { window.removeEventListener('blur', windowBlurHandler); windowBlurHandler = null; }
         if (windowFocusHandler) { window.removeEventListener('focus', windowFocusHandler); windowFocusHandler = null; }
         if (rendererClickHandler && renderer?.domElement) { renderer.domElement.removeEventListener('click', rendererClickHandler); rendererClickHandler = null; }
@@ -20763,6 +20955,7 @@ function detachAllEventHandlers() {
 
 // Centralized session cleanup: stop audio, loops, timers, event listeners, physics, animations, and UI overlays
 function cleanupSessionResources() {
+    clearPlayerHeaven();
     clearCustomerAscensions();
     clearGlassesBlur();
     clearSpillTracks();
@@ -20812,6 +21005,7 @@ function cleanupSessionResources() {
     animationStarted = false;
 
     // 4) Detach all event listeners
+    if (wheelHandler) { document.removeEventListener('wheel', wheelHandler); wheelHandler = null; }
     try {
         if (keydownHandler) { document.removeEventListener('keydown', keydownHandler); keydownHandler = null; }
         if (keyupHandler) { document.removeEventListener('keyup', keyupHandler); keyupHandler = null; }
@@ -21172,7 +21366,7 @@ function tryAttemptCustomerTheft(cust) {
     // Show prominent visual theft alert overlay
     const theftOverlay = document.getElementById('theft-alert-overlay');
     const theftMsg = document.getElementById('theft-alert-msg');
-    if (theftOverlay && theftMsg) {
+    if (CONFIG.POPUP_MODE === 'full' && theftOverlay && theftMsg) {
         theftMsg.innerHTML = `A customer just <strong>YOINKED</strong> your <strong>${item.name || 'item'}</strong> right out of your cart!`;
         theftOverlay.classList.remove('hidden');
         setTimeout(() => {

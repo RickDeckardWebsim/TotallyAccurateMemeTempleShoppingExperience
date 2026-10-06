@@ -76,6 +76,7 @@
     #menu-bg::after { background-position: center top; }
     /* Tuck mute into the art's lower-right shelves, clear of the title */
     .menu-active #mute-toggle { top: calc(1.4vmin + (100vw - 2.8vmin) / 1.5 - 54px); }
+    .menu-active #music-toggle { top: calc(1.4vmin + (100vw - 2.8vmin) / 1.5 - 54px); }
 
     #main-menu {
         left: 50%;

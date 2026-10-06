@@ -1,7 +1,7 @@
 // Main configuration file that imports and combines all modular configs
 import { GAME_MECHANICS } from './config/game-mechanics.js';
 import { PROBABILITIES } from './config/probabilities.js';
-import { GAME_SETTINGS } from './config/game-settings.js';
+import { GAME_SETTINGS, DEFAULT_KEYBINDS } from './config/game-settings.js';
 import { COLORS } from './config/colors.js';
 import { ITEM_SETTINGS } from './config/item-settings.js';
 import { NOTIFICATION_SETTINGS } from './config/notification-settings.js';
@@ -28,3 +28,9 @@ try {
         }
     }
 } catch (_) {}
+
+// Older saves inherit the quieter, simpler defaults. Ignore stale mute bindings.
+CONFIG.SIMPLIFIED_CONTROLS = CONFIG.SIMPLIFIED_CONTROLS !== false;
+if (!['full', 'reduced', 'none'].includes(CONFIG.POPUP_MODE)) CONFIG.POPUP_MODE = 'reduced';
+CONFIG.KEYBINDS = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS && typeof CONFIG.KEYBINDS === 'object' ? CONFIG.KEYBINDS : {}) };
+delete CONFIG.KEYBINDS.mute;

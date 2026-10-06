@@ -351,6 +351,21 @@
         </div>
         <div id="settings-menu">
             <h2>Settings</h2>
+            <div class="comfort-settings">
+                <div>
+                    <label><input type="checkbox" id="simplified-controls" checked> Simplified controls</label>
+                    <small>On by default. Click a customer to slap; E at your cart to attach/detach; scroll to switch lists.</small>
+                </div>
+                <div>
+                    <label for="popup-mode">Notification popups</label>
+                    <select id="popup-mode">
+                        <option value="reduced" selected>Reduced — default</option>
+                        <option value="full">Full — more popups</option>
+                        <option value="none">None — no popups</option>
+                    </select>
+                    <small>Reduced hides routine notices. Required conversations and checkout remain available in every mode.</small>
+                </div>
+            </div>
             <div class="settings-tabs">
                 <button type="button" class="settings-tab-btn active" data-tab="settings-tab-general">General</button>
                 <button type="button" class="settings-tab-btn" data-tab="settings-tab-controls">Controls & Keybinds</button>
@@ -360,6 +375,7 @@
                 <div class="customization-section">
                     <h3>Audio</h3>
                     <label><input type="checkbox" id="sound-on"> Sound on (also the speaker button on the main menu)</label>
+                    <label><input type="checkbox" id="music-on"> Music on (also the ♪ button; Tab frees the mouse in game)</label>
                     <div class="slider-container">
                         <label for="music-volume">Music Volume:</label>
                         <input type="range" id="music-volume" min="0" max="1" step="0.01">
@@ -475,10 +491,6 @@
                         <div class="keybind-row">
                             <span class="keybind-label">Slap:</span>
                             <button type="button" class="keybind-btn" data-action="slap">R</button>
-                        </div>
-                        <div class="keybind-row">
-                            <span class="keybind-label">Mute / Unmute Music:</span>
-                            <button type="button" class="keybind-btn" data-action="mute">M</button>
                         </div>
                         <div class="keybind-row">
                             <span class="keybind-label">Pause Game:</span>
