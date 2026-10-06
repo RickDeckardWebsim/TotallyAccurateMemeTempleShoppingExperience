@@ -11,11 +11,14 @@ export function rollPlayerHeaven(random = Math.random, chancePercent = HEAVEN_CH
 // A separate, lazy scene: no store physics, NPCs, shadows, network generation,
 // new renderer, or post-processing while heaven is on screen.
 export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemName, itemModel,
-    parent, onReturn, onMenu, volume = 0.7, muted = false, random = Math.random }) {
+    parent, onReturn, onMenu, volume = 0.7, muted = false, random = Math.random,
+    createSound, getMusicVolume = () => 0.5, isMusicMuted = () => muted }) {
     let elapsed = 0, phase = 'rising', scene = null, camera = null, idol = null;
     let disposed = false, spoken = false, utterance = null, heavenTime = 0, lastAspect = 0, idolWidth = 0;
     const geometries = new Set(), materials = new Set(), textures = new Set();
     let clouds = null, cloudSeeds = null, cloudTick = -1, haloGlow = null, sunGlow = null;
+    let ascentMusic = null, heavenMusic = null, musicUnavailable = false, playingMusic = null;
+    let retryMusic = false;
     const dummy = new THREE.Object3D();
     const ownGeometry = geometry => (geometries.add(geometry), geometry);
     const ownMaterial = material => (materials.add(material), material);
@@ -30,6 +33,49 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
     const buttons = dialog.querySelectorAll('button');
     buttons[0].onclick = onReturn;
     buttons[1].onclick = onMenu;
+
+    function stopMusic() {
+        for (const track of [ascentMusic, heavenMusic]) { try { track?.release(); } catch (_) {} }
+        ascentMusic = heavenMusic = playingMusic = null;
+    }
+    function updateMusic() {
+        if (!createSound || musicUnavailable) return;
+        const musicMuted = isMusicMuted() || /[?&]mute\b/.test(globalThis.location?.search || '');
+        const rawVolume = getMusicVolume();
+        const musicVolume = Number.isFinite(rawVolume) ? Math.max(0, Math.min(1, rawVolume)) : 0.5;
+        if (!ascentMusic && !musicMuted && musicVolume > 0) {
+            try {
+                // Just two streamed clips per event. Prefetch the small choir
+                // during the rise, never decode it into a long PCM buffer.
+                ascentMusic = createSound('sfx/heaven-ascent.mp3', { stream: true, cinematic: true, loop: true, volume: 0 });
+                heavenMusic = createSound('sfx/heaven-choir.mp3', { stream: true, cinematic: true, preload: 'auto', loop: true, volume: 0 });
+            } catch (_) { stopMusic(); musicUnavailable = true; return; }
+        }
+        if (!ascentMusic) return;
+        if (ascentMusic.muted !== musicMuted) ascentMusic.muted = musicMuted;
+        if (heavenMusic.muted !== musicMuted) heavenMusic.muted = musicMuted;
+        const next = phase === 'rising' ? ascentMusic : heavenMusic;
+        if (playingMusic !== next) {
+            if (playingMusic) { playingMusic.pause(); playingMusic.currentTime = 0; }
+            playingMusic = next;
+            retryMusic = false;
+            try { next.play()?.catch(error => {
+                if (!disposed && playingMusic === next) retryMusic = error?.name === 'NotAllowedError';
+            }); } catch (_) {}
+        }
+        const fadeIn = Math.min(1, (phase === 'rising' ? elapsed : elapsed - heavenTime) / 0.65);
+        const whiteoutFade = phase === 'rising' ? 1 - Number(fade.style.opacity || 0) * 0.85 : 1;
+        // Keep the spoken line intelligible without stopping the choir.
+        const level = musicVolume * fadeIn * whiteoutFade * (utterance ? 0.35 : 1);
+        if (Math.abs(next.volume - level) > 0.001) next.volume = level;
+    }
+    const retryPlayback = () => {
+        if (!disposed && retryMusic) { playingMusic = null; updateMusic(); }
+    };
+    overlay.addEventListener?.('pointerdown', retryPlayback);
+    globalThis.addEventListener?.('keydown', retryPlayback);
+    // Start the ascent clip immediately; it is not tied to building the scene.
+    updateMusic();
 
     function buildHeaven() {
         scene = new THREE.Scene();
@@ -245,11 +291,15 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
                 sunGlow.material.opacity = 0.72 + Math.sin(t * 0.24) * 0.04;
                 if (t > 1.4) { dialog.hidden = false; speak(); }
             }
+            updateMusic();
             return { phase, y };
         },
         dispose() {
             if (disposed) return;
             disposed = true;
+            stopMusic();
+            overlay.removeEventListener?.('pointerdown', retryPlayback);
+            globalThis.removeEventListener?.('keydown', retryPlayback);
             overlay.remove();
             if (utterance && speechSynthesis.speaking) speechSynthesis.cancel();
             // Instanced buffers are per scene; the grocery's shared textures,

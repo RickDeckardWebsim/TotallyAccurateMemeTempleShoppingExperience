@@ -18,14 +18,15 @@
 //    position in the world and are heard from the camera (setListener each frame): quieter with
 //    distance, panned left/right. Each pool has a cap on voices playing at once; when it's full the
 //    oldest voice in it fades out to make room.
-//  - Everything meets in one bus with a limiter, so a pile-up of sounds can't clip.
+//  - World and cinematic routes meet in one limiter, so a pile-up of sounds can't clip.
 // Browsers keep audio silent until the first tap or key press; unlock() runs on those.
 
 import { SFX_PACK } from './sfx-pack.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
 const ctx = AC ? new AC() : null;
-let bus = null;
+let bus = null, cinematicBus = null;
+let soundMuted = false, worldAudioSuspended = false;
 // Audio still locked (before the first tap or key press): a one-shot would only come out late, piled up with
 // the others, once it unlocks. Those are skipped; loops and music wait and start then.
 const locked = () => ctx.state !== 'running';
@@ -37,7 +38,11 @@ if (ctx) {
     limiter.connect(ctx.destination);
     bus = ctx.createGain();
     bus.connect(limiter);
-    if (/[?&]mute\b/.test(location.search)) bus.gain.value = 0; // ?mute: silent (automated tests)
+    // Cinematic music shares the context/limiter, but can outlive a suspended
+    // world mix. Sound-off and ?mute still silence BOTH routes.
+    cinematicBus = ctx.createGain();
+    cinematicBus.connect(limiter);
+    if (/[?&]mute\b/.test(location.search)) bus.gain.value = cinematicBus.gain.value = 0;
     const unlock = () => { if (ctx.state !== 'running') ctx.resume().catch(() => {}); };
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) addEventListener(ev, unlock, true);
 }
@@ -87,7 +92,18 @@ export function prefetchSoundFiles() {
 }
 /** All sound off or on (the menu's speaker button / Settings > Sound). */
 export function setMuted(muted) {
-    if (bus && !/[?&]mute\b/.test(location.search)) bus.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.02);
+    soundMuted = !!muted;
+    applyBusMute();
+}
+/** Temporarily silence store music/SFX without muting the cinematic soundtrack. */
+export function suspendWorldAudio(suspended) {
+    worldAudioSuspended = !!suspended;
+    applyBusMute();
+}
+function applyBusMute() {
+    if (!bus || /[?&]mute\b/.test(location.search)) return;
+    bus.gain.setTargetAtTime(soundMuted || worldAudioSuspended ? 0 : 1, ctx.currentTime, 0.02);
+    cinematicBus.gain.setTargetAtTime(soundMuted ? 0 : 1, ctx.currentTime, 0.02);
 }
 /** Is this file in the pack (played from memory) rather than a file of its own? */
 export function isPacked(src) { return packed.has(href(src)); }
@@ -255,15 +271,18 @@ class StreamSound {
         this.src = src;
         this.el = new Audio(src);
         this.el.loop = !!opts.loop;
-        this.el.preload = 'none';
+        this.el.preload = opts.preload ?? 'none';
+        this.cinematic = !!opts.cinematic;
         this._volume = opts.volume ?? 1;
         this._muted = false;
         this.gain = null;
+        this.source = null;
         if (ctx) {
             try {
                 this.gain = ctx.createGain();
-                ctx.createMediaElementSource(this.el).connect(this.gain);
-                this.gain.connect(bus);
+                this.source = ctx.createMediaElementSource(this.el);
+                this.source.connect(this.gain);
+                this.gain.connect(this.cinematic ? cinematicBus : bus);
             } catch (_) { this.gain = null; }
         }
         this._apply();
@@ -292,15 +311,15 @@ class StreamSound {
         return this.el.play();
     }
     pause() { if (tap && !this.mirror && !this.el.paused) tap.pause(this); this.el.pause(); }
-    cloneNode() { const c = new StreamSound(this.src, { loop: this.loop, volume: this._volume }); c.muted = this._muted; return c; }
+    cloneNode() { const c = new StreamSound(this.src, { loop: this.loop, volume: this._volume, cinematic: this.cinematic }); c.muted = this._muted; return c; }
     /** Done with it: stop downloading and let it go. */
     release() {
         this.pause();
-        try { this.el.removeAttribute('src'); this.el.load(); this.gain?.disconnect(); } catch (_) {}
+        try { this.el.removeAttribute('src'); this.el.load(); this.source?.disconnect(); this.gain?.disconnect(); } catch (_) {}
     }
 }
 
-/** A sound for `src`. opts: {volume, loop, stream, spatial, position} — stream for long sounds (music, ambience). */
+/** A sound for `src`. opts: {volume, loop, stream, spatial, position, cinematic, preload} — cinematic applies to streams only. */
 export function createSound(src, opts = {}) {
     if (!ctx) { const a = new Audio(src); a.loop = !!opts.loop; a.volume = Math.min(1, opts.volume ?? 1); a.release = () => { a.pause(); a.removeAttribute('src'); a.load(); }; return a; }
     return opts.stream && !isPacked(src) ? new StreamSound(src, opts) : new BufferSound(src, opts);

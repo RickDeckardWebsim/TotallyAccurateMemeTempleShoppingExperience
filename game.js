@@ -8,7 +8,7 @@ import * as CANNON from 'cannon-es';
 import { CONFIG } from './config.js';
 import { DEFAULT_GAME_SETTINGS } from './config/game-settings.js';
 import { CONFIG as PROB_DEFAULTS } from './config/probabilities.js';
-import { createSound, setListener, loadSoundPacks, prefetchSoundFiles, setMuted } from './src/audio-engine.js';
+import { createSound, setListener, loadSoundPacks, prefetchSoundFiles, setMuted, suspendWorldAudio } from './src/audio-engine.js';
 import { watchHiddenBottom } from './src/visible-area.js';
 import { SOUND_PICKS } from './src/sound-picks.js';
 import { safePlay as safePlayExt, stopAllAudio as stopAllAudioExt, loadSounds as loadSoundsExt, stopMenuMusic as stopMenuMusicExt, UI_SOUNDS } from './src/audio.js';
@@ -20826,12 +20826,13 @@ function beginPlayerHeaven() {
     playerBody.velocity.set(0, 0, 0);
     gamePaused = true;
     controls?.unlock();
-    setMuted(true);
+    suspendWorldAudio(true);
     document.getElementById('game-container').classList.add('heaven-active');
     logRunEvent('👼 Slipped into heaven');
     playerHeaven = createPlayerHeaven({ THREE, ceilingHeight: CEILING_HEIGHT,
         cameraStartY: camera.position.y, itemName: template.name, itemModel,
         parent: document.getElementById('game-container'), volume: CONFIG.SFX_VOLUME ?? 0.7, muted: audioMuted,
+        createSound, getMusicVolume: () => CONFIG.MUSIC_VOLUME ?? 0.5, isMusicMuted: () => musicMuted || audioMuted,
         onReturn: returnFromPlayerHeaven,
         onMenu: () => { hardStopGame(); stopMenuMusic(); stopFailMusic(); showMainMenu(); }
     });
@@ -20856,6 +20857,7 @@ function returnFromPlayerHeaven() {
 function clearPlayerHeaven() {
     playerHeaven?.dispose(); playerHeaven = null; playerHeavenRestore = null;
     document.getElementById('game-container')?.classList.remove('heaven-active');
+    suspendWorldAudio(false);
     setMuted(audioMuted);
 }
 
