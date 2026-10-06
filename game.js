@@ -29,6 +29,8 @@ import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
 import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
 import { rollManagerSurvey, answerManagerSurvey, advanceManagerSurvey, getManagerFeedbackPenalty } from './src/manager-survey.js';
 import { dressCustomer } from './src/customer-skins.js';
+import { createNotificationCooldown } from './src/notification-cooldown.js';
+import { createCustomerAscensions, detectCustomerFlight } from './src/customer-ascension.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
 import { createRunSeed, RULESET_KEYS, vanillaRulesetValue } from './src/run-seed.js';
@@ -1272,6 +1274,7 @@ let rendererClickHandler = null;
 
 // NEW: Unified mechanics reset to ensure identical behavior on all (re)starts
 function resetAllMechanicsState() {
+    clearCustomerAscensions();
     // Clear held item and transitions
     try {
         if (heldItem) {
@@ -4535,6 +4538,7 @@ function createLayout5() {
 const CEILING_HEIGHT = 5.5;
 
 function createStoreLayout() {
+    clearCustomerAscensions();
     clearRoamingManager();
     if (isLonelyStoreMode) {
         if (sceneLights) {
@@ -5580,6 +5584,87 @@ function updateNpcCartFollow(cust, delta) {
         cust.cart.body.quaternion.setFromEuler(0, facing, 0);
         cust.cart.body.aabbNeedsUpdate = true;
     }
+}
+
+let customerAscensions = null;
+
+function disposeDetachedNpcCart(cart) {
+    const sharedGeometry = getMasterCartGeometry();
+    const geometries = new Set(), materials = new Set();
+    cart.group.traverse(object => {
+        if (object.geometry && object.geometry !== sharedGeometry) geometries.add(object.geometry);
+        if (object.material) for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+    });
+    geometries.forEach(geometry => geometry.dispose());
+    materials.forEach(material => material.dispose());
+}
+
+function dropAscensionItem(item, velocity, carryScale = 1) {
+    if (!item?.mesh) return;
+    // Preserve its actual world transform as it falls out of the tipping basket.
+    scene.attach(item.mesh);
+    item.mesh.scale.multiplyScalar(1 / carryScale);
+    if (item.body?.world === world) world.removeBody(item.body);
+    item.body = makeLooseItemBody(item, item.mesh.position);
+    item.body.velocity.set(velocity.x, velocity.y, velocity.z);
+    item.body.angularVelocity.set(1.2, 0.6, 1.5);
+    item.body.allowSleep = true;
+    item.body.sleepSpeedLimit = 0.15;
+    item.body.sleepTimeLimit = 2;
+    item.isStatic = item.inCart = item.inCustomerCart = item.isCustomerHeld = false;
+    item.isDropping = true;
+    item.hasLanded = false;
+}
+
+function getCustomerAscensions() {
+    if (customerAscensions) return customerAscensions;
+    customerAscensions = createCustomerAscensions({ THREE, scene, world,
+        cartScale: CartPhys.CART_SCALE, ceilingHeight: CEILING_HEIGHT,
+        dropItem: dropAscensionItem, disposeCart: disposeDetachedNpcCart,
+        onStart(customer) {
+            if (customer.scufflePartner) endCustomerScuffle();
+            stopSpillTripCheckForCustomer(customer);
+            touchingCustomers.delete(customer);
+            if (customer.socialPartner?.socialPartner === customer) {
+                customer.socialPartner.socialPartner = null;
+                customer.socialPartner.socialUntil = 0;
+            }
+            customer.socialPartner = null;
+            customer.fleeUntil = 0;
+            customer.interacting = false;
+            if (customer.assignedCar) { customer.assignedCar.assigned = false; customer.assignedCar = null; }
+            logRunEvent('👼 A shopper ascended and abandoned their groceries');
+            displayMessage('👼 This shopper has ascended. Their cart has not.', 3500, true);
+        },
+        returnCustomer(customer) {
+            // Reuse the same shopper instead of spawning another model/physics body.
+            const x = -1.5 + (customer.customerId % 5) * 0.75;
+            customer.body.position.set(x, customer.groundBodyY, -34);
+            customer.body.velocity.set(0, 0, 0);
+            customer.body.angularVelocity.set(0, 0, 0);
+            customer.body.aabbNeedsUpdate = true;
+            if (customer.body.world !== world) world.addBody(customer.body);
+            customer.body.wakeUp();
+            customer.position.set(x, customer.groundBodyY - 0.9, -34);
+            customer.visible = true;
+            customer.behaviorState = 'navigating';
+            customer.itemsGathered = 0;
+            customer.hasStolenItem = false;
+            customer.flightTime = 0;
+            customer.ascensionPending = false;
+            customer.nextQuestionAt = performance.now() + 120000;
+            customer.lastProgressPos?.set(x, 0, -34);
+            customer.lastProgressTime = performance.now();
+            setCustomerTarget(customer, 'shelf');
+        }
+    });
+    return customerAscensions;
+}
+
+function clearCustomerAscensions() {
+    customerAscensions?.clear();
+    customerAscensions = null;
+    for (const customer of customers) { customer.ascensionPending = false; customer.flightTime = 0; }
 }
 
 // Exterior scenery: realistic commercial plaza, grand shopping mall complex in the distance,
@@ -12737,8 +12822,10 @@ const TOAST_RING_POSITIONS = [
     { x: '32%', y: '26%', tilt: '+2.6deg' },  // Top-Left
 ];
 const activeToastsList = [];
+const repeatedToastCooldown = createNotificationCooldown();
 
 function clearAllAlertsAndNotifications() {
+    repeatedToastCooldown.clear();
     activeToastsList.forEach((entry) => {
         if (entry.timerId) clearTimeout(entry.timerId);
         if (entry.el && entry.el.parentNode) entry.el.remove();
@@ -12773,6 +12860,8 @@ function displayMessage(message, duration = 2400, isRngEvent = false, isAllowedI
     if (Nuke.isWorldFrozen()) return;
     const overlay = document.getElementById('alerts-overlay');
     if (!overlay) return;
+
+    if (!repeatedToastCooldown.allow(message)) return;
 
     // Limit active visible toasts in the ring area to 4 at once
     while (activeToastsList.length >= 4) {
@@ -14721,6 +14810,7 @@ function createCustomer({ tweaker = false } = {}) {
     customerBody.updateMassProperties();
     world.addBody(customerBody);
     customerGroup.body = customerBody;
+    customerGroup.groundBodyY = totalHeight / 2 + 0.05;
     customerBody.userData = { entity: customerGroup };
     if (physicsMaterials && physicsMaterials.customerPhysMaterial) {
         customerBody.material = physicsMaterials.customerPhysMaterial;
@@ -16058,10 +16148,19 @@ function animate() {
     }
 
     updateRoamingManager(delta);
+    if (!gamePaused && !isCheckout && !gameOver) customerAscensions?.update(delta);
 
     // Update customers' positions, navigation, and generalized behaviors
     customers.forEach(child => {
         if (!child || !child.body) return;
+        if (child.behaviorState === 'respawning') return;
+        if (!gamePaused && !isCheckout && !gameOver) {
+            if (!customerAscensions && detectCustomerFlight(child, delta)) child.ascensionPending = true;
+            if (child.ascensionPending || customerAscensions) {
+                if (getCustomerAscensions().checkCustomer(child, delta)) return;
+            }
+        }
+        if (child.behaviorState === 'ascending' || child.behaviorState === 'ascended' || child.ascensionPending) return;
 
         // 1. Periodic zone switching / aisle migration
         if (now > (child.zoneSwitchAt || 0) && child.behaviorState !== 'socializing' &&
@@ -16685,7 +16784,7 @@ function animate() {
 
         // Customer interaction with persistent spills
         customers.forEach(c => {
-            if (c?.body && c.visible !== false) {
+            if (c?.body && c.visible !== false && c.behaviorState !== 'ascending' && !c.ascensionPending) {
                 const cx = c.body.position.x;
                 const cz = c.body.position.z;
                 const onSpill = productSpills.some(sp => !sp.sticky && Math.hypot(cx - sp.x, cz - sp.z) < sp.radius);
@@ -20588,6 +20687,7 @@ function startSpillTripCheckForCustomer(cust) {
     // Avoid duplicates
     if (customerSpillTripIntervals.has(cust)) return;
     const id = setInterval(() => {
+        if (!gameStarted || gamePaused || gameOver || isCheckout || cust.behaviorState === 'ascending' || cust.ascensionPending) return;
         // Light stumble for NPCs with 1-in-3 chance
         if (Math.random() < (1/3)) {
             try {
@@ -20665,6 +20765,7 @@ function detachAllEventHandlers() {
 
 // Centralized session cleanup: stop audio, loops, timers, event listeners, physics, animations, and UI overlays
 function cleanupSessionResources() {
+    clearCustomerAscensions();
     clearGlassesBlur();
     clearSpillTracks();
     if (slapHand?.parent) slapHand.parent.remove(slapHand);
