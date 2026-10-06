@@ -1,5 +1,7 @@
 export const HEAVEN_CHANCE = 0.02;
 export const HEAVEN_LINE = 'this is greed, this is your life. you have come home, son.';
+// Length of the supplied choir clip; silent/blocked playback still has an exit.
+export const HEAVEN_CHOIR_DURATION = 12.53;
 
 // One roll per new non-sticky spill entry, never per frame or per second.
 export function rollPlayerHeaven(random = Math.random, chancePercent = HEAVEN_CHANCE * 100) {
@@ -18,7 +20,9 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
     const geometries = new Set(), materials = new Set(), textures = new Set();
     let clouds = null, cloudSeeds = null, cloudTick = -1, haloGlow = null, sunGlow = null;
     let ascentMusic = null, heavenMusic = null, musicUnavailable = false, playingMusic = null;
-    let retryMusic = false;
+    let retryMusic = false, choirFinished = false, choirPlaybackFailed = false;
+    let returnTime = 0, returnBaseZ = 19, returnFov = 52, cloudDeck = null;
+    const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const dummy = new THREE.Object3D();
     const ownGeometry = geometry => (geometries.add(geometry), geometry);
     const ownMaterial = material => (materials.add(material), material);
@@ -39,6 +43,7 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         ascentMusic = heavenMusic = playingMusic = null;
     }
     function updateMusic() {
+        if (phase === 'returning' || phase === 'finished') return;
         if (!createSound || musicUnavailable) return;
         const musicMuted = isMusicMuted() || /[?&]mute\b/.test(globalThis.location?.search || '');
         const rawVolume = getMusicVolume();
@@ -48,7 +53,8 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
                 // Just two streamed clips per event. Prefetch the small choir
                 // during the rise, never decode it into a long PCM buffer.
                 ascentMusic = createSound('sfx/heaven-ascent.mp3', { stream: true, cinematic: true, loop: true, volume: 0 });
-                heavenMusic = createSound('sfx/heaven-choir.mp3', { stream: true, cinematic: true, preload: 'auto', loop: true, volume: 0 });
+                heavenMusic = createSound('sfx/heaven-choir.mp3', { stream: true, cinematic: true, preload: 'auto', loop: false, volume: 0 });
+                heavenMusic.onended = () => { if (!disposed) choirFinished = true; };
             } catch (_) { stopMusic(); musicUnavailable = true; return; }
         }
         if (!ascentMusic) return;
@@ -60,7 +66,10 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
             playingMusic = next;
             retryMusic = false;
             try { next.play()?.catch(error => {
-                if (!disposed && playingMusic === next) retryMusic = error?.name === 'NotAllowedError';
+                if (!disposed && playingMusic === next) {
+                    retryMusic = error?.name === 'NotAllowedError';
+                    if (next === heavenMusic) choirPlaybackFailed = true;
+                }
             }); } catch (_) {}
         }
         const fadeIn = Math.min(1, (phase === 'rising' ? elapsed : elapsed - heavenTime) / 0.65);
@@ -70,7 +79,9 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         if (Math.abs(next.volume - level) > 0.001) next.volume = level;
     }
     const retryPlayback = () => {
-        if (!disposed && retryMusic) { playingMusic = null; updateMusic(); }
+        if (!disposed && retryMusic && phase !== 'returning' && phase !== 'finished') {
+            choirPlaybackFailed = false; playingMusic = null; updateMusic();
+        }
     };
     overlay.addEventListener?.('pointerdown', retryPlayback);
     globalThis.addEventListener?.('keydown', retryPlayback);
@@ -127,6 +138,7 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         scene.add(clouds);
         const deck = new THREE.Mesh(ownGeometry(new THREE.PlaneGeometry(180, 180)), cloudMat);
         deck.rotation.x = -Math.PI / 2; deck.position.y = -5.5; scene.add(deck);
+        cloudDeck = deck;
 
         // Two tiny procedural textures supply all glow. No bloom render target,
         // full-screen blur, transparent cloud stacks, shadows or downloaded assets.
@@ -239,6 +251,56 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         clouds.instanceMatrix.needsUpdate = true;
     }
 
+    function beginReturn() {
+        phase = 'returning'; returnTime = elapsed;
+        returnBaseZ = camera.position.z; returnFov = camera.fov;
+        camera.far = returnBaseZ + 240;
+        dialog.hidden = true; cloudDeck.visible = false; cloudTick = -1;
+        stopMusic();
+        if (utterance && globalThis.speechSynthesis?.speaking) speechSynthesis.cancel();
+        utterance = null;
+    }
+
+    function updateReturn(t, aspect) {
+        const progress = Math.min(1, t / 4.6);
+        const pull = Math.pow(progress, 1.6);
+        const shake = reducedMotion ? 0 : (0.12 + Math.exp(-t * 3) * 0.2) * (1 - progress * 0.6);
+        camera.position.set(Math.sin(t * 61) * shake, 6.5 + Math.sin(t * 47) * shake,
+            returnBaseZ + pull * 110);
+        camera.aspect = Math.max(0.2, aspect);
+        camera.fov = returnFov + (reducedMotion ? 0 : Math.sin(progress * Math.PI) * 6);
+        camera.updateProjectionMatrix(); camera.lookAt(0, 6.5, 0);
+        camera.rotateZ(Math.sin(t * 31) * shake * 0.08);
+        // Reuse ALL 96 cloud instances: 13 six-puff tunnel rings, then three
+        // closing rings. No extra meshes, effects pools, textures or timers.
+        const tick = Math.floor(t * 20);
+        if (tick !== cloudTick) {
+            cloudTick = tick;
+            const cap = Math.max(0, Math.min(1, (progress - 0.48) / 0.52));
+            const close = cap * cap * (3 - 2 * cap);
+            for (let i = 0; i < clouds.count; i++) {
+                const ring = Math.floor(i / 6), angle = (i % 6) * Math.PI / 3 + ring * 0.22;
+                const closing = ring >= 13;
+                const radius = closing ? 8 * (1 - close) + 0.5 : 6.5;
+                dummy.position.set(Math.cos(angle) * radius * Math.max(0.65, camera.aspect),
+                    6.5 + Math.sin(angle) * radius,
+                    closing ? camera.position.z - 9 - (ring - 13) * 2 : returnBaseZ - 14 + ring * 9);
+                const puff = closing ? 3.2 + close * 1.8 : 2.6 + cloudSeeds[i * 8 + 7] * 0.12;
+                dummy.scale.set(puff * Math.max(1, camera.aspect), puff, puff * 0.8);
+                dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); clouds.setMatrixAt(i, dummy.matrix);
+            }
+            clouds.instanceMatrix.needsUpdate = true;
+        }
+        // The final white veil completes the cloud seal, including wide screens.
+        fade.style.opacity = String(Math.max(0, (progress - 0.82) / 0.18));
+        if (progress >= 1) {
+            phase = 'finished';
+            onMenu();
+            return null;
+        }
+        return { phase, y: camera.position.y };
+    }
+
     function speak() {
         if (spoken) return;
         spoken = true;
@@ -259,9 +321,10 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         get scene() { return scene; },
         get camera() { return camera; },
         update(delta, aspect) {
-            if (disposed) return null;
+            if (disposed || phase === 'finished') return null;
             elapsed += Math.max(0, Math.min(delta, 0.1));
             const y = cameraStartY + elapsed * 0.35 + elapsed * elapsed * 0.12;
+            if (phase === 'returning') return updateReturn(elapsed - returnTime, aspect);
             if (phase === 'rising') {
                 // Whiteout starts only as the player's viewpoint crosses the ceiling.
                 fade.style.opacity = String(Math.max(0, Math.min(1, (y - ceilingHeight) / 0.75)));
@@ -290,6 +353,12 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
                 haloGlow.material.opacity = 0.5 + Math.sin(t * 0.8) * 0.07;
                 sunGlow.material.opacity = 0.72 + Math.sin(t * 0.24) * 0.04;
                 if (t > 1.4) { dialog.hidden = false; speak(); }
+                const duration = Number.isFinite(heavenMusic?.duration) ? heavenMusic.duration : HEAVEN_CHOIR_DURATION;
+                const silent = !heavenMusic || musicUnavailable || choirPlaybackFailed || isMusicMuted() || getMusicVolume() <= 0;
+                if (choirFinished || (silent && t >= HEAVEN_CHOIR_DURATION) || t >= Math.max(duration, HEAVEN_CHOIR_DURATION) + 8) {
+                    beginReturn();
+                    return updateReturn(0, aspect);
+                }
             }
             updateMusic();
             return { phase, y };
@@ -307,7 +376,7 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
             scene?.traverse(node => { if (node.isInstancedMesh) node.dispose(); });
             geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose());
             textures.forEach(texture => texture.dispose());
-            scene = camera = idol = itemModel = clouds = cloudSeeds = haloGlow = sunGlow = null;
+            scene = camera = idol = itemModel = clouds = cloudSeeds = haloGlow = sunGlow = cloudDeck = null;
         }
     };
 }

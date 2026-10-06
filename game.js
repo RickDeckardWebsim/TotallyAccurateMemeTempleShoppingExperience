@@ -15731,15 +15731,19 @@ function animate() {
     // Compute frame delta for consistent physics stepping
     const delta = clock.getDelta();
     if (playerHeaven) {
-        const state = playerHeaven.update(delta, camera.aspect);
+        const heaven = playerHeaven;
+        const state = heaven.update(delta, camera.aspect);
+        // Automatic return can clean up the event inside update(). Do not render
+        // a disposed scene or dereference the cleared controller this frame.
+        if (!state || playerHeaven !== heaven) return;
         if (state?.phase === 'rising') {
             camera.position.y = state.y;
             playerBody.position.y = playerHeavenRestore.position.y + state.y - playerHeavenRestore.cameraPosition.y;
             playerBody.aabbNeedsUpdate = true;
             camera.rotation.x = Math.min(0.7, camera.rotation.x + delta * 0.3);
             renderer.render(scene, camera);
-        } else if (playerHeaven.scene) {
-            renderer.render(playerHeaven.scene, playerHeaven.camera);
+        } else if (heaven.scene) {
+            renderer.render(heaven.scene, heaven.camera);
         }
         return;
     }
