@@ -6,6 +6,7 @@ export const CONFIG = {
     POWER_OUTAGE_CHANCE: 6,        // Chance of power outage (6%)
     OUT_OF_STOCK_CHANCE: 8,        // Chance an item on list is out of stock / missing (8%)
     SLIPPERY_FLOOR_CHANCE: 13,     // Chance of slipping on floor (13%)
+    SLIP_AND_DIE_CHANCE: 2,       // Temporary testing slider: heaven chance per non-sticky spill entry
     CART_STUCK_CHANCE: 8,          // Chance of cart wheel getting stuck
     STORE_CLOSING_CHANCE: 10,      // Chance of store closing in 1 minute (10%)
     TRIPPING_CHANCE: 0.01,         // Tripping chance (0.01%)

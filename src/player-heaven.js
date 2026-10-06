@@ -2,8 +2,10 @@ export const HEAVEN_CHANCE = 0.02;
 export const HEAVEN_LINE = 'this is greed, this is your life. you have come home, son.';
 
 // One roll per new non-sticky spill entry, never per frame or per second.
-export function rollPlayerHeaven(random = Math.random) {
-    return random() < HEAVEN_CHANCE;
+export function rollPlayerHeaven(random = Math.random, chancePercent = HEAVEN_CHANCE * 100) {
+    const chance = Number.isFinite(chancePercent)
+        ? Math.max(0, Math.min(100, chancePercent)) / 100 : HEAVEN_CHANCE;
+    return chance > 0 && random() < chance;
 }
 
 // A separate, lazy scene: no store physics, NPCs, shadows, network generation,

@@ -16875,7 +16875,7 @@ function animate() {
             if (onSpill && !playerOnSpill) {
                 playerOnSpill = true;
                 unlockAchievement('slip');
-                if (rollPlayerHeaven() && beginPlayerHeaven()) return;
+                if (rollPlayerHeaven(Math.random, CONFIG.SLIP_AND_DIE_CHANCE) && beginPlayerHeaven()) return;
                 displayMessage("Oops, slippery spill! Moving slower here.", 2500);
                 if (Math.random() < dropAllItemsOnSpillChance) {
                     triggerTrip();
@@ -17235,6 +17235,7 @@ function restoreVanillaGameDefaults() {
     CONFIG.POWER_OUTAGE_CHANCE = PROB_DEFAULTS.POWER_OUTAGE_CHANCE;
     CONFIG.FORGOT_GLASSES_CHANCE = PROB_DEFAULTS.FORGOT_GLASSES_CHANCE;
     CONFIG.SLIPPERY_FLOOR_CHANCE = PROB_DEFAULTS.SLIPPERY_FLOOR_CHANCE;
+    CONFIG.SLIP_AND_DIE_CHANCE = PROB_DEFAULTS.SLIP_AND_DIE_CHANCE;
     CONFIG.STORE_CLOSING_CHANCE = PROB_DEFAULTS.STORE_CLOSING_CHANCE;
     CONFIG.THIEF_BREAK_IN_CHANCE = PROB_DEFAULTS.THIEF_BREAK_IN_CHANCE;
     CONFIG.TWO_IN_ONE_ITEM_CHANCE = PROB_DEFAULTS.TWO_IN_ONE_ITEM_CHANCE;
@@ -19001,7 +19002,7 @@ async function startNewGameInner() {
 
 function setAllEventsToZero() {
     const eventSliderIds = [
-        'power-outage', 'forgot-glasses', 'slippery-floor', 'store-closing', 'thief-chance',
+        'power-outage', 'forgot-glasses', 'slippery-floor', 'slip-and-die-chance', 'store-closing', 'thief-chance',
         'two-in-one', 'single-item-list', 'empty-shelf',
         'trip-chance', 'accidental-drop', 'customer-question', 'customer-theft-chance',
         'no-money', 'out-of-stock-chance', 'cart-stuck-chance', 'product-spill', 'checkout-button',
@@ -19142,6 +19143,7 @@ function resetToDefaults() {
     CONFIG.POWER_OUTAGE_CHANCE = PROB_DEFAULTS.POWER_OUTAGE_CHANCE;
     CONFIG.FORGOT_GLASSES_CHANCE = PROB_DEFAULTS.FORGOT_GLASSES_CHANCE;
     CONFIG.SLIPPERY_FLOOR_CHANCE = PROB_DEFAULTS.SLIPPERY_FLOOR_CHANCE;
+    CONFIG.SLIP_AND_DIE_CHANCE = PROB_DEFAULTS.SLIP_AND_DIE_CHANCE;
     CONFIG.STORE_CLOSING_CHANCE = PROB_DEFAULTS.STORE_CLOSING_CHANCE;
     CONFIG.THIEF_BREAK_IN_CHANCE = PROB_DEFAULTS.THIEF_BREAK_IN_CHANCE;
     CONFIG.TWO_IN_ONE_ITEM_CHANCE = PROB_DEFAULTS.TWO_IN_ONE_ITEM_CHANCE;
@@ -19201,6 +19203,7 @@ function applyConfigToCustomizationSliders() {
         ['power-outage', CONFIG.POWER_OUTAGE_CHANCE],
         ['forgot-glasses', CONFIG.FORGOT_GLASSES_CHANCE],
         ['slippery-floor', CONFIG.SLIPPERY_FLOOR_CHANCE],
+        ['slip-and-die-chance', CONFIG.SLIP_AND_DIE_CHANCE ?? 2],
         ['store-closing', CONFIG.STORE_CLOSING_CHANCE],
         ['thief-chance', CONFIG.THIEF_BREAK_IN_CHANCE],
         ['two-in-one', CONFIG.TWO_IN_ONE_ITEM_CHANCE],
@@ -19296,6 +19299,7 @@ function saveAndStartCustomGame() {
     CONFIG.POWER_OUTAGE_CHANCE = parseFloat(document.getElementById('power-outage').value);
     CONFIG.FORGOT_GLASSES_CHANCE = parseFloat(document.getElementById('forgot-glasses').value);
     CONFIG.SLIPPERY_FLOOR_CHANCE = parseFloat(document.getElementById('slippery-floor').value);
+    CONFIG.SLIP_AND_DIE_CHANCE = parseFloat(document.getElementById('slip-and-die-chance').value);
     CONFIG.STORE_CLOSING_CHANCE = parseFloat(document.getElementById('store-closing').value);
     CONFIG.THIEF_BREAK_IN_CHANCE = parseFloat(document.getElementById('thief-chance').value);
     CONFIG.TWO_IN_ONE_ITEM_CHANCE = parseFloat(document.getElementById('two-in-one').value);
@@ -19987,6 +19991,7 @@ function restoreDefaultConfig() {
     CONFIG.FORGOT_GLASSES_CHANCE = PROB_DEFAULTS.FORGOT_GLASSES_CHANCE;
     CONFIG.OUT_OF_STOCK_CHANCE = PROB_DEFAULTS.OUT_OF_STOCK_CHANCE;
     CONFIG.SLIPPERY_FLOOR_CHANCE = PROB_DEFAULTS.SLIPPERY_FLOOR_CHANCE;
+    CONFIG.SLIP_AND_DIE_CHANCE = PROB_DEFAULTS.SLIP_AND_DIE_CHANCE;
     CONFIG.CART_STUCK_CHANCE = PROB_DEFAULTS.CART_STUCK_CHANCE;
     CONFIG.STORE_CLOSING_CHANCE = PROB_DEFAULTS.STORE_CLOSING_CHANCE;
     CONFIG.TRIPPING_CHANCE = PROB_DEFAULTS.TRIPPING_CHANCE;
@@ -20915,6 +20920,7 @@ function persistUserSettings() {
         'POWER_OUTAGE_CHANCE','SLIPPERY_FLOOR_CHANCE','STORE_CLOSING_CHANCE','THIEF_BREAK_IN_CHANCE',
         'TWO_IN_ONE_ITEM_CHANCE','EMPTY_SHELF_CHANCE','TRIPPING_CHANCE','NO_MONEY_CHANCE',
         'PRODUCT_SPILL_CHANCE','CHECKOUT_BUTTON_REQUIRED_CHANCE','ADD_ITEM_CHANCE','REMOVE_ITEM_CHANCE',
+        'SLIP_AND_DIE_CHANCE',
         'BABY_CRYING_CHANCE','BABY_IN_CART_CHANCE','CHECKOUT_BUSY_CHANCE','POWERUP_CHANCE','FALLING_SHELF_CHANCE','FALLING_SHELF_ENABLED','MISLABELED_ITEM_CHANCE','WEIGHT_CHANGE_CHANCE',
         // Controls
         'LOOK_SENSITIVITY',
