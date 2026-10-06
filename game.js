@@ -18291,7 +18291,6 @@ function createProductSpillAt(x, z, itemName = 'Liquid') {
         x,
         z,
         radius: 2.6,
-        trackColor: tintColor,
         sticky
     };
     productSpills.push(spillEntry);
@@ -18402,8 +18401,7 @@ function triggerProductSpill() {
         body: spillBody,
         x,
         z,
-        radius: 3.8,
-        trackColor: 0xb91c1c
+        radius: 3.8
     };
     productSpills.push(spillEntry);
     productSpill = spillMesh;

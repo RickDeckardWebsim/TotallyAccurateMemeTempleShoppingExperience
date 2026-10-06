@@ -11,6 +11,47 @@ const wheels = Array.from({ length: 4 }, () => ({ x: NaN, z: NaN, wet: 0, color:
 const point = new THREE.Vector3(), position = new THREE.Vector3(), scale = new THREE.Vector3();
 const rotation = new THREE.Quaternion(), matrix = new THREE.Matrix4(), color = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
+const decalTextureColors = new WeakMap();
+const decalTint = new THREE.Color();
+
+function sampleDecalColor(texture) {
+    const image = texture?.image;
+    if (!image || !(image.naturalWidth || image.width) || !(image.naturalHeight || image.height)) return null;
+    const cached = decalTextureColors.get(texture);
+    if (cached?.image === image) return cached.color;
+    let sampled = null;
+    try {
+        // Small, one-time CPU sample. Ignore transparent pixels; multiply the
+        // texture's actual color by its material tint, just like the decal shader.
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0, 32, 32);
+        const pixels = ctx.getImageData(0, 0, 32, 32).data;
+        const pixel = new THREE.Color();
+        let red = 0, green = 0, blue = 0, weight = 0;
+        const space = texture.colorSpace === THREE.SRGBColorSpace ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
+        for (let i = 0; i < pixels.length; i += 4) {
+            const alpha = pixels[i + 3] / 255;
+            if (alpha < 0.05) continue;
+            pixel.setRGB(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255, space);
+            red += pixel.r * alpha; green += pixel.g * alpha; blue += pixel.b * alpha; weight += alpha;
+        }
+        if (weight > 0) sampled = new THREE.Color(red / weight, green / weight, blue / weight);
+    } catch (_) {
+        // Unreadable textures safely use their real material tint, never a red override.
+    }
+    decalTextureColors.set(texture, { image, color: sampled });
+    return sampled;
+}
+
+export function getSpillTrackColor(spill) {
+    const material = spill.mesh?.material;
+    decalTint.copy(material?.color || color.setHex(0xffffff));
+    const textureColor = sampleDecalColor(material?.map);
+    if (textureColor) decalTint.multiply(textureColor);
+    return decalTint.getHex();
+}
 
 function makeTexture(foot) {
     const canvas = document.createElement('canvas');
@@ -43,7 +84,9 @@ function makePool(scene, capacity, foot) {
     const opacity = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
     opacity.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('trackOpacity', opacity);
-    const material = new THREE.MeshLambertMaterial({
+    // The spill itself is unlit: use the same shading so store lights cannot
+    // independently darken/recolor the footprints and wheel streaks.
+    const material = new THREE.MeshBasicMaterial({
         map: makeTexture(foot), transparent: true, depthWrite: false, alphaTest: 0.02,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
     });
@@ -53,7 +96,7 @@ function makePool(scene, capacity, foot) {
         shader.fragmentShader = 'varying float vTrackOpacity;\n' + shader.fragmentShader;
         shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vTrackOpacity;');
     };
-    material.customProgramCacheKey = () => 'spill-track-opacity-v1';
+    material.customProgramCacheKey = () => 'spill-track-opacity-v2';
     const mesh = new THREE.InstancedMesh(geometry, material, capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.count = 0;
@@ -76,7 +119,7 @@ function contact(spills, x, z) {
 function loadWetness(state, spill) {
     if (!spill) return;
     state.wet = 1;
-    state.color = spill.trackColor ?? spill.mesh.material.color.getHex();
+    state.color = getSpillTrackColor(spill);
 }
 
 function stamp(pool, x, z, yaw, width, length, state, now) {
