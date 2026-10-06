@@ -162,6 +162,9 @@ function removeItemBody(item) {
     cartItems.delete(item);
 }
 
+/** Controlled checkout transfer; inventory/list ownership stays with the cart. */
+export function removeItemFromCart(item) { removeItemBody(item); }
+
 /** Wake every basket item; kick adds a small random shove (a bump). */
 export function wakeCartItems(kick = 0) {
     for (const item of cartItems) {
@@ -265,7 +268,7 @@ function syncBaby() {
 }
 
 /** Per-frame basket update: adopt/release items, step, sync meshes. */
-export function stepCartPhysics(delta) {
+export function stepCartPhysics(delta, frozen = false) {
     if (!ctx) return;
     ensureCartWorld();
     const cart3D = ctx.getCart3D();
@@ -289,6 +292,16 @@ export function stepCartPhysics(delta) {
         }
     }
     syncBaby();
+
+    // Checkout temporarily removes one body at a time. Keep every other item
+    // at its settled pose so reloading cannot overlap a shifted neighbour.
+    if (frozen) {
+        for (const item of cartItems) {
+            item.cartBody.velocity.set(0, 0, 0); item.cartBody.angularVelocity.set(0, 0, 0);
+            item.cartBody.sleep();
+        }
+        return;
+    }
 
     let anyAwake = false;
     for (const item of cartItems) {

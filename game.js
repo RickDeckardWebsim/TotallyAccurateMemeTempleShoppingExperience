@@ -33,6 +33,7 @@ import { createNotificationCooldown } from './src/notification-cooldown.js';
 import { shouldShowNotification } from './src/notification-policy.js';
 import { createCustomerAscensions, detectCustomerFlight } from './src/customer-ascension.js';
 import { rollPlayerHeaven, createPlayerHeaven } from './src/player-heaven.js';
+import { createCheckoutConveyor } from './src/checkout-conveyor.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
 import { createRunSeed, RULESET_KEYS, vanillaRulesetValue } from './src/run-seed.js';
@@ -463,6 +464,8 @@ let collectedItems = [];
 let heldItem = null;
 let heldItemPulling = false;
 let isCheckout = false;
+let checkoutConveyor = null, checkoutCameraRestore = null, checkoutRowsActive = [];
+let checkoutWorkerRequested = false;
 let gameStarted = false;
 let gameOver = false;
 let gameTime = 0; // track elapsed for pause/resume
@@ -4190,6 +4193,7 @@ function getRunMetrics(elapsed) {
 }
 
 function endGame() {
+    if (checkoutConveyor) teardownCheckoutPanel();
     // Stop the game timer and event reroll cycle
     clearInterval(timer);
     timer = null;
@@ -12497,7 +12501,7 @@ function triggerGumCraving() {
         const rows = Array.from(listEl.querySelectorAll('.checkout-row'));
         const allScanned = rows.length > 0 && rows.every(r => r.classList.contains('scanned'));
         const cravingOk = (!gumCravingActive || hasGumInCart());
-        confirmBtn.disabled = !allScanned || !cravingOk;
+        confirmBtn.disabled = !allScanned || !cravingOk || (!isLonelyStoreMode && !checkoutConveyor?.done);
     }
 }
 
@@ -12523,19 +12527,30 @@ function buildCheckoutPanel() {
           <button class="btn btn-secondary" id="btn-cancel">Cancel</button>
           <button class="btn btn-primary" id="btn-confirm" disabled>Confirm Purchase</button>
         </div>
-        <div class="checkout-footer-note">Thank you for shopping at MagMart!</div>
+        <div class="checkout-footer-note" id="checkout-status">Attendant coming to the register. Groceries scan automatically.</div>
       </div>
     `;
     checkoutUIElement.classList.remove('hidden');
+    if (!isLonelyStoreMode) checkoutUIElement.classList.add('conveyor-checkout');
     checkoutUIElement.classList.add('visible');
 }
 
 function teardownCheckoutPanel() {
+    checkoutConveyor?.dispose(); checkoutConveyor = null; checkoutRowsActive = [];
+    checkoutWorkerRequested = false;
+    if (checkoutCameraRestore) {
+        camera.position.copy(checkoutCameraRestore.position);
+        camera.quaternion.copy(checkoutCameraRestore.quaternion);
+        syncCameraAngles(checkoutCameraRestore.yaw, checkoutCameraRestore.pitch);
+        cartAttached = checkoutCameraRestore.attached;
+        checkoutCameraRestore = null;
+    }
     if (gumCravingTimeoutId) {
         clearTimeout(gumCravingTimeoutId);
         gumCravingTimeoutId = null;
     }
     checkoutUIElement.classList.remove('visible');
+    checkoutUIElement.classList.remove('conveyor-checkout');
     checkoutUIElement.classList.add('hidden');
     // Don't clear innerHTML immediately (allow CSS fade); clear in a tick
     setTimeout(() => { checkoutUIElement.innerHTML = ''; }, 200);
@@ -12551,8 +12566,7 @@ function updateCheckoutTotalsFromRows(rows) {
     if (totEl) totEl.textContent = currency(total);
 }
 
-// Scan beeps come from a small pool of clones so rapid scanning (Crazy Scanner
-// sweeps) never has to seek/restart one shared audio element per row.
+// A small clone pool keeps rapid conveyor scans from restarting one shared beep.
 const scanBeepPool = [];
 let scanBeepIndex = 0;
 let lastScanBeepAt = 0;
@@ -12577,45 +12591,28 @@ function playScanBeep() {
     } catch (_) {}
 }
 
-function wireCheckoutRowScanning(rows) {
+function updateConveyorCheckoutProgress() {
     const progressEl = document.getElementById('checkout-progress');
     const confirmBtn = document.getElementById('btn-confirm');
-    let progressFrame = 0;
-    const updateProgress = () => {
-        progressFrame = 0;
-        let scanned = 0;
-        for (const r of rows) if (r.scanned) scanned++;
-        if (progressEl) progressEl.textContent = `${scanned} / ${rows.length} scanned`;
-        const allScanned = (scanned === rows.length);
-        const cravingOk = (!gumCravingActive || hasGumInCart());
-        if (confirmBtn) confirmBtn.disabled = !allScanned || !cravingOk;
-    };
-    // Coalesce many scans in one frame into a single DOM update.
-    const queueProgress = () => { if (!progressFrame) progressFrame = requestAnimationFrame(updateProgress); };
-    const scanRow = (r, scanned) => {
-        r.scanned = scanned;
-        r.el.classList.toggle('scanned', scanned);
-        playScanBeep();
-    };
-    rows.forEach(r => {
-        r.el.addEventListener('click', () => {
-            if (checkoutBusyActive) {
-                displayMessage("Please wait until the register is free.", 1500);
-                return;
-            }
-            if (crazyScannerActive && r.scanned) return;
-            scanRow(r, !r.scanned);
-            if (progressFrame) { cancelAnimationFrame(progressFrame); }
-            updateProgress();
+    const total = checkoutRowsActive.reduce((n, row) => n + row.qty, 0);
+    const scanned = checkoutRowsActive.reduce((n, row) => n + row.scannedQty, 0);
+    if (progressEl) progressEl.textContent = `${scanned} / ${total} scanned`;
+    if (confirmBtn) confirmBtn.disabled = (!isLonelyStoreMode && !checkoutConveyor?.done) || scanned !== total || (gumCravingActive && !hasGumInCart());
+    const status = document.getElementById('checkout-status');
+    if (status) status.textContent = isLonelyStoreMode ? 'Click the receipt items to scan and escape.' : checkoutConveyor?.done
+        ? 'All groceries back in your cart. Confirm purchase when ready.'
+        : 'Attendant scanning and reloading your cart automatically.';
+}
+
+// Lonely Store has no attendant and retains its entrance/register escape flow.
+function wireLonelyCheckoutRows(rows) {
+    for (const row of rows) {
+        row.el.addEventListener('click', () => {
+            row.scanned = !row.scanned; row.scannedQty = row.scanned ? row.qty : 0;
+            row.el.classList.toggle('scanned', row.scanned);
+            playScanBeep(); updateConveyorCheckoutProgress();
         });
-        // Crazy Scanner: sweeping the pointer over a row scans it.
-        r.el.addEventListener('pointerenter', () => {
-            if (checkoutBusyActive || !crazyScannerActive || r.scanned) return;
-            scanRow(r, true);
-            queueProgress();
-        }, { passive: true });
-    });
-    updateProgress();
+    }
 }
 
 function populateCheckoutList() {
@@ -12642,15 +12639,22 @@ function populateCheckoutList() {
             <div class="checkout-price">${currency(price * entry.qty)}</div>
         `;
         listEl.appendChild(row);
-        rows.push({ name: entry.name, qty: entry.qty, price, el: row, scanned: false });
+        rows.push({ name: entry.name, gift: entry.gift, qty: entry.qty, price, el: row, scanned: false, scannedQty: 0 });
     });
     updateCheckoutTotalsFromRows(rows);
-    wireCheckoutRowScanning(rows);
+    checkoutRowsActive = rows;
+    updateConveyorCheckoutProgress();
     return rows;
 }
 
 function startCheckoutProcess() {
     if (isCheckout || gameOver || purchaseComplete) return;
+    if (!isLonelyStoreMode && (!cart3D || !cartObject?.visible || cartFlingActive || !checkout || Math.hypot(cartObject.position.x - checkout.position.x, cartObject.position.z - checkout.position.z) > 5.5)) {
+        displayMessage('Park your cart near the checkout conveyor to scan your groceries.', 2500, true);
+        checkoutExitCooldownUntil = Date.now() + 2500;
+        return;
+    }
+    requestCheckoutWorker();
     if (checkoutButtonRequired && checkoutButton && !checkoutButton.pressed) {
         if (!checkoutButtonAlertShown) {
             displayMessage("The checkout machine is off. Please press the green button!", 3000, true);
@@ -12695,6 +12699,11 @@ function startCheckoutProcess() {
     if (tweakerMoneyRisk) { tweakerMoneyFailure = true; endGame(); return; }
 
     isCheckout = true;
+    if (!isLonelyStoreMode) {
+        checkoutCameraRestore = { position: camera.position.clone(), quaternion: camera.quaternion.clone(),
+            yaw: cameraTargetYaw, pitch: cameraTargetPitch, attached: cartAttached };
+        cartAttached = false; clearHeldKeys();
+    }
     controls.unlock();
 
     // Start sound effect for terminal (already plays cash register)
@@ -12724,6 +12733,24 @@ function startCheckoutProcess() {
     }
 
     const checkoutRows = populateCheckoutList();
+    if (isLonelyStoreMode) wireLonelyCheckoutRows(checkoutRows);
+    else checkoutConveyor = createCheckoutConveyor({ THREE, scene, cart: cart3D, counter: checkout,
+        items: collectedItems, removeBody: CartPhys.removeItemFromCart,
+        restoreBody: (item, position, quaternion) => {
+            CartPhys.addItemToCart(item, position, quaternion);
+            item.cartBody?.sleep();
+        },
+        onScan: item => {
+            const row = checkoutRows.find(r => r.name === item.name && r.gift === !!item.isManagerGift);
+            if (row) {
+                row.scannedQty++; row.scanned = row.scannedQty >= row.qty;
+                row.el.classList.toggle('scanned', row.scanned);
+                row.el.querySelector('.checkout-qty').textContent = `${row.scannedQty}/${row.qty}`;
+            }
+            playScanBeep();
+        },
+        onProgress: updateConveyorCheckoutProgress
+    });
 
     // Wire buttons
     const btnCancel = document.getElementById('btn-cancel');
@@ -12754,9 +12781,9 @@ function startCheckoutProcess() {
                 return;
             }
             // ensure all scanned
-            const allScanned = checkoutRows.every(r => r.scanned);
+            const allScanned = (isLonelyStoreMode || checkoutConveyor?.done) && checkoutRows.every(r => r.scanned);
             if (!allScanned) {
-                displayMessage("Scan all items to confirm purchase.", 2000);
+                displayMessage("Wait for the attendant to scan and reload every item.", 2000);
                 return;
             }
             purchaseComplete = true;
@@ -13887,6 +13914,7 @@ function countObtainableInStore(name) {
 }
 
 function checkCheckoutReady() {
+    if (!isCheckout) checkoutWorkerRequested = false;
     if (!playerBody || !gameStarted || isCheckout || gameOver || gamePaused || purchaseComplete) return;
 
     if (isLonelyStoreMode) {
@@ -13929,6 +13957,7 @@ function checkCheckoutReady() {
     }
 
     if (allAvailableCollected) {
+        requestCheckoutWorker();
         // Player is near the checkout and has gathered all obtainable list items
         startCheckoutProcess();
     }
@@ -14227,6 +14256,19 @@ function cleanupStoreWorker() {
     if (storeWorker) {
         if (storeWorker.parent) storeWorker.parent.remove(storeWorker);
         if (storeWorker.body) { try { world.removeBody(storeWorker.body); } catch(_) {} }
+        const staffIndex = staffModels.indexOf(storeWorker);
+        if (staffIndex >= 0) staffModels.splice(staffIndex, 1);
+        // Worker models own these assets; release each shared limb material /
+        // geometry once rather than retaining retired attendants between runs.
+        const geometries = new Set(), materials = new Set(), textures = new Set();
+        storeWorker.traverse(node => {
+            if (node.geometry) geometries.add(node.geometry);
+            if (node.material) for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+                materials.add(material); if (material.map) textures.add(material.map);
+            }
+        });
+        textures.forEach(texture => texture.dispose());
+        materials.forEach(material => material.dispose()); geometries.forEach(geometry => geometry.dispose());
         storeWorker = null;
     }
 }
@@ -14251,13 +14293,14 @@ function createStoreWorker() {
     workerBody.linearFactor = new CANNON.Vec3(1, 0, 1);
     workerBody.fixedRotation = true;
     workerBody.collisionFilterGroup = 4;
-    workerBody.collisionFilterMask = 1;
+    workerBody.collisionFilterMask = 1 | 2;
     world.addBody(workerBody);
     workerGroup.body = workerBody;
     workerBody.userData = { entity: workerGroup };
 
     workerGroup.workerState = 'idle_register';
     workerGroup.registerStation = registerStation;
+    workerGroup.checkoutStation = new THREE.Vector3(14.05, 0, -16.45);
     workerGroup.outsideDock = new THREE.Vector3(0, 0, -38);
     workerGroup.nextRestockTime = performance.now() + (22000 + Math.random() * 12000);
     workerGroup.stateTimer = 0;
@@ -14270,6 +14313,31 @@ function createStoreWorker() {
     scene.add(workerGroup);
     storeWorker = workerGroup;
     return workerGroup;
+}
+
+function requestCheckoutWorker() {
+    checkoutWorkerRequested = true;
+    const w = storeWorker;
+    if (!w || Nuke.isNukeActive()) return;
+    w.nextRestockTime = performance.now() + 30000;
+    w.targetShelf = null; w.boxMesh.visible = false;
+    if (w.workerState === 'checkout_return' || Math.hypot(w.body.position.x - w.checkoutStation.x, w.body.position.z - w.checkoutStation.z) < 0.25) return;
+    const p = w.body.position;
+    if (p.z <= -16.32 && p.z >= -19 && p.x >= 11 && p.x <= 19) {
+        w.nav.path = [{ x: w.checkoutStation.x, z: w.checkoutStation.z }];
+        w.nav.waypointIdx = 0; w.workerState = 'checkout_return'; return;
+    }
+    const gate = { x: p.x > 15 ? 19.5 : 10.5, z: -18.2 };
+    const outside = p.z < -28;
+    const start = outside ? { x: 0, z: -26.8 } : { x: p.x, z: p.z };
+    const path = navGrid ? findPath(navGrid, start, gate) : [gate];
+    w.nav.path = [...(outside ? [start] : []), ...path, gate, { x: w.checkoutStation.x, z: w.checkoutStation.z }];
+    w.nav.waypointIdx = 0; w.workerState = 'checkout_return';
+}
+
+function checkoutWorkerReady() {
+    return !storeWorker || Math.hypot(storeWorker.body.position.x - storeWorker.checkoutStation.x,
+        storeWorker.body.position.z - storeWorker.checkoutStation.z) < 0.3;
 }
 
 // Every staff model ever built, so the nuke can make them all panic.
@@ -14348,6 +14416,18 @@ function createWorkerModel() {
     workerGroup.add(body);
     workerGroup.bodyMesh = body;
 
+    // Two simple shared-geometry arms make the register attendant visibly work.
+    const sleeveGeometry = new THREE.CylinderGeometry(0.075, 0.09, 0.52, 8);
+    const handGeometry = new THREE.SphereGeometry(0.085, 8, 5);
+    const sleeveMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 });
+    for (const side of [-1, 1]) {
+        const pivot = new THREE.Group(); pivot.position.set(side * 0.35, chestY + 0.2, 0);
+        const sleeve = new THREE.Mesh(sleeveGeometry, sleeveMaterial); sleeve.position.y = -0.22;
+        const hand = new THREE.Mesh(handGeometry, headMaterial); hand.position.y = -0.51;
+        pivot.add(sleeve, hand); workerGroup.add(pivot);
+        workerGroup[side < 0 ? 'leftArm' : 'rightArm'] = pivot;
+    }
+
     // Staff Name Badge on chest
     const badge = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.06, 0.02),
@@ -14408,7 +14488,7 @@ function createWorkerModel() {
 }
 
 function updateStoreWorker(delta) {
-    if (!storeWorker || !gameStarted || isCheckout || gameOver) return;
+    if (!storeWorker || !gameStarted || gameOver || gamePaused) return;
 
     const now = performance.now();
     const w = storeWorker;
@@ -14422,6 +14502,32 @@ function updateStoreWorker(delta) {
 
     // Natural genuine eyelid blinking for worker
     updateEyelidBlink(w, now);
+
+    if (checkoutWorkerRequested || isCheckout || w.workerState === 'checkout_return') {
+        w.body.collisionFilterMask = 2; // scenery blocks the route; waiting players cannot pin the cashier
+        w.boxMesh.visible = false;
+        if (!checkoutWorkerReady()) {
+            if (w.workerState !== 'checkout_return') requestCheckoutWorker();
+            stepWorkerAlongPath(w, delta, 3.8);
+        } else {
+            w.workerState = 'idle_register';
+            w.body.velocity.x = w.body.velocity.z = 0;
+            w.nextRestockTime = now + 30000;
+            w.rotation.y = THREE.MathUtils.lerp(w.rotation.y, 0, Math.min(1, delta * 8));
+            const scanning = isCheckout && !!checkoutConveyor?.item;
+            w.bodyMesh.rotation.x = scanning ? Math.sin(now * 0.013) * 0.08 : 0;
+            if (w.leftArm) w.leftArm.rotation.x = scanning ? -0.85 + Math.sin(now * 0.014) * 0.15 : 0;
+            if (w.rightArm) w.rightArm.rotation.x = scanning ? -1.05 - Math.sin(now * 0.014) * 0.15 : 0;
+            if (w.leftLeg) w.leftLeg.rotation.x = 0;
+            if (w.rightLeg) w.rightLeg.rotation.x = 0;
+        }
+        w.position.copy(w.body.position); w.position.y = 0;
+        return;
+    }
+    w.body.collisionFilterMask = 1 | 2;
+    w.bodyMesh.rotation.x = 0;
+    if (w.leftArm) w.leftArm.rotation.x = w.boxMesh.visible ? -0.9 : 0;
+    if (w.rightArm) w.rightArm.rotation.x = w.boxMesh.visible ? -0.9 : 0;
 
     // 1. STATE: Idle at Register
     if (w.workerState === 'idle_register') {
@@ -14645,7 +14751,7 @@ function updateStaffNukePanic(now) {
 }
 
 // Move worker along waypoints
-function stepWorkerAlongPath(w, delta) {
+function stepWorkerAlongPath(w, delta, speed = w.walkSpeed) {
     if (!w.nav.path || w.nav.waypointIdx >= w.nav.path.length) return;
 
     const tgt = w.nav.path[w.nav.waypointIdx];
@@ -14653,7 +14759,7 @@ function stepWorkerAlongPath(w, delta) {
     const dz = tgt.z - w.body.position.z;
     const dist = Math.hypot(dx, dz);
 
-    if (dist < 0.6) {
+    if (dist < (w.workerState === 'checkout_return' ? 0.18 : 0.6)) {
         w.nav.waypointIdx++;
         if (w.nav.waypointIdx >= w.nav.path.length) {
             w.body.velocity.x = 0;
@@ -14664,8 +14770,9 @@ function stepWorkerAlongPath(w, delta) {
 
     const invLen = 1 / (dist || 1);
     const dirX = dx * invLen, dirZ = dz * invLen;
-    w.body.velocity.x = dirX * w.walkSpeed;
-    w.body.velocity.z = dirZ * w.walkSpeed;
+    const safeSpeed = Math.min(speed, dist / Math.max(delta, 1 / 240));
+    w.body.velocity.x = dirX * safeSpeed;
+    w.body.velocity.z = dirZ * safeSpeed;
 
     // Face movement direction
     const targetAngle = Math.atan2(dirX, dirZ);
@@ -16980,13 +17087,23 @@ function animate() {
 
     // Cart hull in the world (thrown items land in it) and the basket contents
     CartPhys.updateCartHull(delta, !!(cartObject?.visible && gameStarted && !isCheckout));
-    CartPhys.stepCartPhysics(delta);
+    CartPhys.stepCartPhysics(delta, isCheckout);
     updateSpillTracks(scene, productSpills, playerBody, cart3D,
         gameStarted && !gamePaused && !gameOver && !isCheckout && !tripped,
         cartAttached && !cartFlingActive && !!cartObject?.visible, now);
 
     // Update Store Worker Restocker
     updateStoreWorker(delta);
+    if (isCheckout && checkoutConveyor) {
+        const ready = checkoutWorkerReady();
+        checkoutConveyor.update(delta, ready && !checkoutBusyActive, crazyScannerActive ? 2.3 : 1);
+        if (!ready) {
+            const status = document.getElementById('checkout-status');
+            if (status && status.textContent !== 'Attendant hurrying to the register…') status.textContent = 'Attendant hurrying to the register…';
+        }
+        camera.position.set(checkout.position.x + 3.6, 3.4, checkout.position.z + 5.8);
+        camera.lookAt(checkout.position.x - 0.1, 1.1, checkout.position.z + 0.15);
+    }
 
     // Update NPC carts following their owners
     const dt = delta;
@@ -20968,6 +21085,7 @@ function detachAllEventHandlers() {
 // Centralized session cleanup: stop audio, loops, timers, event listeners, physics, animations, and UI overlays
 function cleanupSessionResources() {
     clearPlayerHeaven();
+    teardownCheckoutPanel();
     clearCustomerAscensions();
     clearGlassesBlur();
     clearSpillTracks();

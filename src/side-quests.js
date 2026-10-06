@@ -850,10 +850,10 @@ function startTrunkLoading() {
     overlay.innerHTML = `<div class="trunk-scene">
         <div class="trunk-heading">Load the trunk <span class="trunk-count">0/${groceries.length}</span></div>
         <div class="trunk-lid">TRUNK</div>
-        <div class="trunk-dropzone"><span>SWIPE GROCERIES HERE ↑</span><div class="trunk-loaded"></div></div>
+        <div class="trunk-dropzone"><span>TRUNK SLOT — DROP HERE ↑</span><div class="trunk-loaded"></div></div>
         <div class="trunk-bumper"></div>
         <div class="trunk-groceries"></div>
-        <div class="trunk-hint">Swipe each bag into the trunk</div>
+        <div class="trunk-hint">Drag items from below into the trunk slot. On touch screens, hold and drag each bag.</div>
     </div>`;
     document.getElementById('game-container').appendChild(overlay);
     car.loadingEl = overlay;
@@ -865,7 +865,7 @@ function startTrunkLoading() {
         bag.className = 'trunk-bag';
         bag.innerHTML = `<span class="trunk-bag-icon">🛍️</span><span class="trunk-bag-name"></span>`;
         bag.querySelector('.trunk-bag-name').textContent = name;
-        bag.setAttribute('aria-label', `Swipe ${name} into trunk`);
+        bag.setAttribute('aria-label', `Drag ${name} from below into the trunk slot`);
         tray.appendChild(bag);
         let startX, startY;
         bag.addEventListener('pointerdown', event => {
