@@ -5,9 +5,9 @@ import * as CANNON from 'cannon-es';
 import { buildCarModel } from './car-skins.js';
 import { equippedCarSkin } from './shop.js';
 import { createSound } from './audio-engine.js';
+import { RETURN_DESK as DESK, boxSupportHeight, supportReturnOnCounter } from './return-counter.js';
 
 const BATH = { x0: 30, doorZ: -27.9, zMin: -30, zMax: -21.5 };
-const DESK = { x: -22, z: -24, topY: 1.2, hx: 1.82, hz: 0.92 };
 const CHANGE_GOAL = 100; // cents
 
 let api = null;
@@ -595,7 +595,8 @@ function releaseThrow() {
     body.addEventListener('collide', () => { if (!bumped) { bumped = true; play('thud', 0.5, true); } });
     r.flying = {
         ...held, body, t: 0, still: 0, failT: 0,
-        previousPosition: new CANNON.Vec3(body.position.x, body.position.y, body.position.z)
+        previousPosition: new CANNON.Vec3(body.position.x, body.position.y, body.position.z),
+        previousBottom: body.position.y - boxSupportHeight(held.half, body.quaternion)
     };
     hideHud();
 }
@@ -644,27 +645,9 @@ function updateReturns(dt) {
     if (f) {
         f.t += dt;
         const p = f.body.position;
-        // Fast throws can cross the countertop between physics steps. Check the
-        // full path since the previous frame so an item cannot tunnel through it.
-        const previous = f.previousPosition;
-        const landingY = DESK.topY + f.half.y;
-        if (previous && previous.y >= landingY && p.y < landingY) {
-            const fraction = (previous.y - landingY) / (previous.y - p.y);
-            const hitX = previous.x + (p.x - previous.x) * fraction;
-            const hitZ = previous.z + (p.z - previous.z) * fraction;
-            if (Math.abs(hitX - DESK.x) <= DESK.hx - f.half.x &&
-                Math.abs(hitZ - DESK.z) <= DESK.hz - f.half.z) {
-                p.set(hitX, landingY + 0.005, hitZ);
-                f.body.velocity.set(0, 0, 0);
-                f.body.angularVelocity.set(0, 0, 0);
-                f.body.aabbNeedsUpdate = true;
-            }
-        }
-        if (f.previousPosition) f.previousPosition.set(p.x, p.y, p.z);
-        else f.previousPosition = new CANNON.Vec3(p.x, p.y, p.z);
+        const onDesk = supportReturnOnCounter(f);
         f.mesh.position.copy(p);
         f.mesh.quaternion.copy(f.body.quaternion);
-        const onDesk = Math.abs(p.x - DESK.x) < DESK.hx && Math.abs(p.z - DESK.z) < DESK.hz && p.y > DESK.topY && p.y < DESK.topY + 0.9;
         const speed = f.body.velocity.length();
         if (onDesk && speed < 0.35) {
             // Keep returned items from slowly sliding off the counter after landing.

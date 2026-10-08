@@ -35,6 +35,8 @@ import { shouldShowNotification } from './src/notification-policy.js';
 import { createCustomerAscensions, detectCustomerFlight } from './src/customer-ascension.js';
 import { rollPlayerHeaven, createPlayerHeaven } from './src/player-heaven.js';
 import { createCheckoutConveyor } from './src/checkout-conveyor.js';
+import { RETURN_DESK } from './src/return-counter.js';
+import { createShopperTraffic } from './src/shopper-traffic.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
 import { createRunSeed, RULESET_KEYS, vanillaRulesetValue } from './src/run-seed.js';
@@ -827,6 +829,7 @@ let nightSkyTexture = null;
 // Add a reference to the loaded sky texture so we can restore it after outages
 let autoDoors = null; // Automatic sliding doors state
 let parkingLotCars = []; // Exterior parked and driving vehicles
+let shopperTraffic = null;
 let carInstancedMeshes = {}; // InstancedMesh references for vehicles
 // Track transient UI timeouts to avoid overlapping/flicker
 let messageTimeoutId = null;
@@ -4754,6 +4757,7 @@ function createStoreLayout() {
     // Update obstacle list for pathfinding
     obstacles = [...shelfUnits, ...constructionZones, ...sampleBooths];
     navGrid = buildNavGrid({ shelfUnits, constructionZones, sampleBooths, bounds: { minX: -28, maxX: 28, minZ: -28, maxZ: 28 }, cellSize: 0.5 });
+    shopperTraffic = createShopperTraffic({ cars: parkingLotCars, grid: navGrid, findPath, clampToWalkable, isWalkable });
 
     // Create checkout
     createCheckout();
@@ -5569,7 +5573,7 @@ function updateNpcCartSound(cust, speed, delta) {
 }
 function sweepNpcCartSounds(all = false) {
     for (const [cust, entry] of npcCartSounds) {
-        if (all || gameOver || !cust.hasCart || !customers.includes(cust)) {
+        if (all || gameOver || cust.visible === false || !cust.hasCart || !customers.includes(cust)) {
             try { entry.sound.pause(); } catch (_) {}
             npcCartSounds.delete(cust);
         }
@@ -5578,7 +5582,7 @@ function sweepNpcCartSounds(all = false) {
 
 // The shopper already smooths its heading; keep the handle rigidly in front of them.
 function updateNpcCartFollow(cust, delta) {
-    if (!cust.hasCart || !cust.cart || !cust.body) return;
+    if (cust.visible === false || cust.cartParked || !cust.hasCart || !cust.cart || !cust.body) return;
     const velx = cust.body.velocity.x, velz = cust.body.velocity.z;
     const speed = Math.hypot(velx, velz);
     updateNpcCartSound(cust, speed, delta);
@@ -5939,13 +5943,15 @@ function createExteriorScenery() {
     addParkingSection(-lotCenter, lotCenter, 42, 28, 0);
     addParkingSection(lotCenter, lotCenter, 42, 28, 0);
 
-    // Number of cars equals the number of people in the store (12 customers)
-    const targetStoreCars = 12;
+    // Twelve shoppers plus two spare event cars, in the entrance-side lot.
+    // The same instanced vehicles are reused for departures and new arrivals.
+    const targetStoreCars = 14;
     // Shuffle candidate stalls randomly
     const shuffledStalls = [...candidateStalls].sort(() => Math.random() - 0.5);
-    const chosenStalls = shuffledStalls.slice(0, targetStoreCars);
+    const frontStalls = shuffledStalls.filter(st => st.z < -45 && st.z > -75 && Math.abs(st.x) > 3.5 && Math.abs(st.x) < 49 && Math.abs(Math.sin(st.heading)) < 0.01);
+    const chosenStalls = frontStalls.slice(0, targetStoreCars);
     // Empty stalls close to the entrance for the player's own car.
-    playerCarSpots = shuffledStalls.slice(targetStoreCars).filter(st =>
+    playerCarSpots = shuffledStalls.filter(st => !chosenStalls.includes(st)).filter(st =>
         st.z < -45 && Math.abs(st.x) > 2.5 && Math.hypot(st.x, st.z + 38) < 20 &&
         chosenStalls.every(o => Math.hypot(o.x - st.x, o.z - st.z) > 2.4));
     chosenStalls.forEach(st => {
@@ -5953,6 +5959,8 @@ function createExteriorScenery() {
             x: st.x + (Math.random() * 0.1 - 0.05),
             z: st.z,
             heading: st.heading,
+            shopperCar: true,
+            aisleZ: -lotCenter - 14 + 5.5 + 3.2,
             color: carColors[Math.floor(Math.random() * carColors.length)]
         });
     });
@@ -7609,55 +7617,7 @@ function updateCarInstanceTransform(i, car) {
 
 function updateDrivingCars(delta) {
     if (!parkingLotCars || !parkingLotCars.length || !carInstancedMeshes.bodyMesh) return;
-    let needsUpdate = false;
-
-    parkingLotCars.forEach((car, i) => {
-        if (!car.isDriving) return;
-        needsUpdate = true;
-
-        if (!car.driveState) car.driveState = 'backing_out';
-        if (!car.driveSpeed) car.driveSpeed = 2.0;
-
-        if (car.driveState === 'backing_out') {
-            const revSpeed = 2.4;
-            car.x += Math.sin(car.heading) * revSpeed * delta;
-            car.z += Math.cos(car.heading) * revSpeed * delta;
-            car.backupDist = (car.backupDist || 0) + revSpeed * delta;
-            if (car.backupDist >= 4.0) {
-                car.driveState = 'turning';
-                car.targetHeading = car.x > 0 ? -Math.PI / 2 : Math.PI / 2;
-            }
-        } else if (car.driveState === 'turning') {
-            const turnSpeed = 2.0;
-            const diff = (car.targetHeading || -Math.PI / 2) - car.heading;
-            if (Math.abs(diff) > 0.08) {
-                car.heading += Math.sign(diff) * turnSpeed * delta;
-            } else {
-                car.heading = car.targetHeading;
-                car.driveState = 'driving_away';
-            }
-            car.x -= Math.sin(car.heading) * 3.0 * delta;
-            car.z -= Math.cos(car.heading) * 3.0 * delta;
-        } else if (car.driveState === 'driving_away') {
-            car.driveSpeed = Math.min(11.0, car.driveSpeed + delta * 4.5);
-            car.x -= Math.sin(car.heading) * car.driveSpeed * delta;
-            car.z -= Math.cos(car.heading) * car.driveSpeed * delta;
-
-            if (car.z < -160 || Math.abs(car.x) > 160) {
-                car.isDriving = false;
-                car.assigned = false;
-                car.driveState = null;
-                car.backupDist = 0;
-                if (car.origX !== undefined) {
-                    car.x = car.origX;
-                    car.z = car.origZ;
-                    car.heading = car.origHeading;
-                }
-            }
-        }
-
-        updateCarInstanceTransform(i, car);
-    });
+    const needsUpdate = shopperTraffic?.updateCars(delta, performance.now(), updateCarInstanceTransform);
 
     if (needsUpdate) {
         if (carInstancedMeshes.bodyMesh) carInstancedMeshes.bodyMesh.instanceMatrix.needsUpdate = true;
@@ -8652,13 +8612,13 @@ function createInfoBooth(x, y, z) {
     scene.add(booth);
     registerCullableObject(booth, 5.5);
 
-    // Add physics collider for counter
-    const boothShape = new CANNON.Box(new CANNON.Vec3(1.9, 0.6, 1.0));
-    const boothBody = new CANNON.Body({
-        mass: 0,
-        shape: boothShape
-    });
-    boothBody.position.set(x, y + 0.6, z);
+    // Match both the wooden base and the complete visible quartz overhang.
+    const boothBody = new CANNON.Body({ mass: 0 });
+    boothBody.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.5, 0.9)), new CANNON.Vec3(0, 0.62, 0));
+    boothBody.addShape(new CANNON.Box(new CANNON.Vec3(RETURN_DESK.hx, 0.04, RETURN_DESK.hz)), new CANNON.Vec3(0, 1.16, 0));
+    boothBody.position.set(x, y, z);
+    boothBody.collisionFilterGroup = 2;
+    boothBody.collisionFilterMask = 1 | 4 | 8;
     world.addBody(boothBody);
 }
 
@@ -11224,6 +11184,7 @@ function aimedPlayerCart() {
     camera.getWorldDirection(sharedRaycaster.ray.direction);
     const hit = sharedRaycaster.intersectObject(cart3D, true)[0];
     const item = findAccessibleItemUnderCrosshair(sharedRaycaster, CONFIG.ARM_REACH * 1.8);
+    if (CONFIG.SIMPLIFIED_CONTROLS && item && !item.inCart) return false;
     if (hit && item && !item.inCart) {
         const itemHit = sharedRaycaster.intersectObject(item.mesh, true)[0];
         if (itemHit && itemHit.distance < hit.distance) return false;
@@ -13205,7 +13166,7 @@ function isItemAccessible(targetItem, ray) {
     }
 
     // 2. Check if blocked through the shopping cart
-    if (isItemOccludedByCart(targetItem, ray)) {
+    if (!CONFIG.SIMPLIFIED_CONTROLS && isItemOccludedByCart(targetItem, ray)) {
         return false;
     }
 
@@ -13236,6 +13197,9 @@ function findAccessibleItemUnderCrosshair(ray, maxReach) {
     for (let i = 0; i < allItems.length; i++) {
         const item = allItems[i];
         if (item.inCustomerCart || item.isCustomerHeld || !item.mesh || !item.mesh.parent || item === heldItem) continue;
+        // Simplified E reaches past the cart, including groceries already in
+        // its basket. Cart contents stay removable after detaching as before.
+        if (CONFIG.SIMPLIFIED_CONTROLS && cartAttached && item.inCart) continue;
         item.mesh.getWorldPosition(_reachTmpVec);
         const distSq = _reachTmpVec.distanceToSquared(camPos);
         if (distSq > reachSq) continue;
@@ -15064,7 +15028,10 @@ function createCustomer({ tweaker = false } = {}) {
     }
 
     // Set initial target
-    if (!tweaker) setCustomerTarget(customerGroup);
+    if (!tweaker) {
+        shopperTraffic?.claimCar(customerGroup);
+        setCustomerTarget(customerGroup);
+    }
     return customerGroup;
 }
 
@@ -15085,6 +15052,12 @@ function checkWhiskerObstacle(x, z, angle, length = 1.1) {
 function setCustomerTarget(cust, targetMode = null) {
     if (!navGrid) return;
     const now = performance.now();
+    // Interruptions resume their existing trip, not a random shelf/checkout.
+    if (!targetMode && cust.journey === 'out') targetMode = 'leaving_store';
+    if (!targetMode && (cust.journey === 'in' || cust.journey === 'boarding')) {
+        cust.behaviorState = cust.journey === 'in' ? 'walking_into_store' : 'walking_to_car';
+        return;
+    }
     
     let mode = targetMode;
     if (!mode) {
@@ -15098,48 +15071,14 @@ function setCustomerTarget(cust, targetMode = null) {
     }
 
     let target = null;
+    if (mode !== 'checkout') shopperTraffic?.releaseQueue(cust);
 
-    if (mode === 'leaving_store') {
-        let car = parkingLotCars.find(c => !c.assigned && !c.isDriving && c.z > -85);
-        if (!car && parkingLotCars.length > 0) car = parkingLotCars[Math.floor(Math.random() * parkingLotCars.length)];
-        if (car) {
-            car.assigned = true;
-            if (car.origX === undefined) {
-                car.origX = car.x;
-                car.origZ = car.z;
-                car.origHeading = car.heading;
-            }
-        }
-        cust.assignedCar = car;
-
-        const doorInside = { x: 0, z: -27.5 };
-        const doorOutside = { x: 0, z: -33.5 };
-        const carX = car ? (car.x - 1.2 * Math.cos(car.heading)) : 0;
-        const carZ = car ? (car.z - 1.2 * Math.sin(car.heading)) : -45;
-        const carDoorPos = { x: carX, z: carZ };
-
-        const startPos = { x: cust.body.position.x, z: cust.body.position.z };
-        const pathToDoor = (navGrid ? findPath(navGrid, startPos, doorInside) : null) || [doorInside];
-        cust.nav = cust.nav || {};
-        cust.nav.path = [...pathToDoor, doorOutside, carDoorPos];
-        cust.nav.waypointIdx = 0;
-        cust.behaviorState = 'walking_to_car';
+    if (mode === 'leaving_store' || mode === 'exit') {
+        shopperTraffic?.walkToCar(cust);
         return;
-    } else if (mode === 'exit') {
-        // Exit doors near entrance (0, 0, -26)
-        const ex = (Math.random() - 0.5) * 4;
-        const ez = -26.5;
-        const pt = clampToWalkable(navGrid, ex, ez);
-        target = new THREE.Vector3(pt.x, 0, pt.z);
-        cust.behaviorState = 'sneaking';
     } else if (mode === 'checkout') {
-        // Line near checkout register (12.5, 0, -13.5)
-        const cx = 12.5 + (Math.random() - 0.5) * 2.0;
-        const cz = -13.5 + (Math.random() - 0.5) * 1.5;
-        const pt = clampToWalkable(navGrid, cx, cz);
-        target = new THREE.Vector3(pt.x, 0, pt.z);
-        cust.behaviorState = 'navigating';
-        cust.nextTargetMode = 'checkout_wait';
+        shopperTraffic?.joinQueue(cust, now);
+        return;
     } else {
         // Pick shelf to visit
         if (shelfUnits.length > 0) {
@@ -16412,8 +16351,16 @@ function animate() {
     if (!gamePaused && !isCheckout && !gameOver) customerAscensions?.update(delta);
 
     // Update customers' positions, navigation, and generalized behaviors
+    shopperTraffic?.syncQueue(now);
     customers.forEach(child => {
         if (!child || !child.body) return;
+        if (shopperTraffic?.updateCustomer(child, now, delta)) {
+            if (child.visible !== false) {
+                child.position.set(child.body.position.x, child.body.position.y - (child.groundBodyY || 0.9), child.body.position.z);
+                child.leftLeg.rotation.x *= 0.8; child.rightLeg.rotation.x *= 0.8;
+            }
+            return;
+        }
         if (child.behaviorState === 'respawning') return;
         if (!gamePaused && !isCheckout && !gameOver) {
             if (!customerAscensions && detectCustomerFlight(child, delta)) child.ascensionPending = true;
@@ -16570,7 +16517,7 @@ function animate() {
                 child.body.velocity.z = 0;
 
                 // Face the checkout counter belt
-                const checkoutYaw = -Math.PI / 2;
+                const checkoutYaw = child.checkoutSlot > 0 ? Math.PI / 2 : -Math.PI / 2;
                 slerpToYaw(child, checkoutYaw, 0.1);
 
                 if (child.head) {
@@ -16578,20 +16525,13 @@ function animate() {
                     child.head.rotation.y = Math.sin(now * 0.003) * 0.1;
                 }
 
-                // Completed checkout: pack items and leave the store to drive away!
-                if (now >= (child.checkoutUntil || 0)) {
+                // Only the head of the spaced line uses the register. Waiting
+                // shoppers advance when a real slot frees, never pile into it.
+                const atRegister = shopperTraffic?.isFront(child) && !checkoutBusyActive;
+                if (atRegister && !child.checkoutUntil) child.checkoutUntil = now + 3500 + Math.random() * 3000;
+                if (atRegister && child.checkoutUntil && now >= child.checkoutUntil) {
                     if (child.head) child.head.rotation.set(0, 0, 0);
-                    if (child.handItem) {
-                        if (child.handItem.mesh && child.handItem.mesh.parent) child.handItem.mesh.parent.remove(child.handItem.mesh);
-                        child.handItem = null;
-                    }
-                    if (child.cart && child.cart.items && child.cart.items.length > 0) {
-                        child.cart.items.forEach(it => {
-                            if (it.mesh && it.mesh.parent) it.mesh.parent.remove(it.mesh);
-                        });
-                        child.cart.items = [];
-                    }
-                    child.itemsGathered = 0;
+                    // Keep their groceries visible until they load their car.
                     setCustomerTarget(child, 'leaving_store');
                 }
             }
@@ -16610,37 +16550,13 @@ function animate() {
                     if (d < 0.55) {
                         child.nav.waypointIdx++;
                         if (child.nav.waypointIdx >= child.nav.path.length) {
-                            if (child.behaviorState === 'walking_to_car') {
-                                const car = child.assignedCar;
-                                if (car) {
-                                    car.isDriving = true;
-                                    car.driveState = 'backing_out';
-                                    car.backupDist = 0;
-                                    car.driveSpeed = 2.0;
-                                }
-                                child.visible = false;
-                                if (child.cart && child.cart.group) child.cart.group.visible = false;
-                                child.body.position.set(0, -60, 0);
-                                child.body.velocity.set(0, 0, 0);
-                                child.behaviorState = 'respawning';
-
-                                // Customer respawn loop from parking lot entrance
-                                setTimeout(() => {
-                                    if (!gameStarted || isCheckout || gameOver) return;
-                                    child.visible = true;
-                                    if (child.cart && child.cart.group) child.cart.group.visible = true;
-                                    child.itemsGathered = 0;
-                                    child.shoppingListQuota = 2 + Math.floor(Math.random() * 4);
-                                    child.assignedCar = null;
-                                    const enterX = (Math.random() - 0.5) * 4;
-                                    child.body.position.set(enterX, 0.9, -34);
-                                    child.position.set(enterX, 0, -34);
-                                    child.behaviorState = 'navigating';
-                                    setCustomerTarget(child, 'shelf');
-                                }, 14000);
+                            if (child.journey) {
+                                const entering = child.journey === 'in';
+                                shopperTraffic?.arrived(child, now);
+                                if (entering) setCustomerTarget(child, 'shelf');
                             } else if (child.nextTargetMode === 'checkout_wait') {
                                 child.behaviorState = 'checkout_wait';
-                                child.checkoutUntil = now + (3500 + Math.random() * 3000);
+                                child.checkoutUntil = 0;
                             } else if (child.behaviorState === 'sneaking') {
                                 // Successfully reached exit: safely clear any held item
                                 if (child.handItem) {
@@ -16661,7 +16577,7 @@ function animate() {
                             }
                         }
                     } else {
-                        const isSneaking = child.behaviorState === 'sneaking';
+                        const isSneaking = child.behaviorState === 'sneaking' || (child.role === 'shoplifter' && child.hasStolenItem);
                         const baseSpeed = isSneaking ? (child.walkSpeed * 1.35) : child.walkSpeed;
                         const desiredDirX = dx / d;
                         const desiredDirZ = dz / d;
@@ -16676,9 +16592,12 @@ function animate() {
                         const currentAngle = Math.atan2(desiredDirX, desiredDirZ);
 
                         // A. Whisker checks against store geometry
-                        const leftBlocked = checkWhiskerObstacle(child.body.position.x, child.body.position.z, currentAngle - 0.6, 1.0);
-                        const rightBlocked = checkWhiskerObstacle(child.body.position.x, child.body.position.z, currentAngle + 0.6, 1.0);
-                        const centerBlocked = checkWhiskerObstacle(child.body.position.x, child.body.position.z, currentAngle, 1.2);
+                        const blockedAt = (angle, length) => child.journey && shopperTraffic
+                            ? !shopperTraffic.canWalk(child.body.position.x + Math.sin(angle) * length, child.body.position.z + Math.cos(angle) * length)
+                            : checkWhiskerObstacle(child.body.position.x, child.body.position.z, angle, length);
+                        const leftBlocked = blockedAt(currentAngle - 0.6, 1.0);
+                        const rightBlocked = blockedAt(currentAngle + 0.6, 1.0);
+                        const centerBlocked = blockedAt(currentAngle, 1.2);
 
                         if (centerBlocked) {
                             if (!leftBlocked) {
@@ -16694,7 +16613,7 @@ function animate() {
 
                         // B. Reciprocal NPC Mutual Awareness, Yielding & Avoidance
                         customers.forEach(other => {
-                            if (other === child || !other.body) return;
+                            if (other === child || !other.body || other.visible === false) return;
                             if (child.socialPartner === other) return;
 
                             const ox = other.body.position.x - child.body.position.x;
@@ -16705,6 +16624,8 @@ function animate() {
                             // Social Encounter Initiation
                             if (dist > 1.2 && dist < 2.0 &&
                                 child.behaviorState === 'navigating' && other.behaviorState === 'navigating' &&
+                                !child.checkoutQueued && !other.checkoutQueued && !child.journey && !other.journey &&
+                                child.body.position.z > -18 && other.body.position.z > -18 &&
                                 child.role !== 'shoplifter' && other.role !== 'shoplifter' &&
                                 now > (child.socialCooldownUntil || 0) && now > (other.socialCooldownUntil || 0)) {
                                 if (Math.random() < 0.05) {
@@ -16734,7 +16655,7 @@ function animate() {
                                 separationX -= (ox / dist) * push * 0.85;
                                 separationZ -= (oz / dist) * push * 0.85;
 
-                                if (now > (child.bumpCooldownUntil || 0)) {
+                                if ((child.customerId || 0) > (other.customerId || 0) && now > (child.bumpCooldownUntil || 0)) {
                                     child.bumpYieldUntil = now + 450 + Math.random() * 300;
                                     child.bumpReactionUntil = now + 750;
                                     child.bumpCooldownUntil = now + 1400;
@@ -16747,12 +16668,13 @@ function animate() {
                                 const otherIsMoving = (other.body.velocity && (Math.hypot(other.body.velocity.x, other.body.velocity.z) > 0.15));
                                 const relVx = (child.body.velocity.x - (other.body.velocity ? other.body.velocity.x : 0));
                                 const relVz = (child.body.velocity.z - (other.body.velocity ? other.body.velocity.z : 0));
-                                const isApproachingHeadOn = (ox * relVx + oz * relVz) < -0.1;
+                                const isApproachingHeadOn = (ox * relVx + oz * relVz) > 0.1 &&
+                                    child.body.velocity.x * (other.body.velocity?.x || 0) + child.body.velocity.z * (other.body.velocity?.z || 0) < 0;
 
                                 if (isApproachingHeadOn) {
                                     // Rule of the road: both veer smoothly to their right
-                                    const sideX = -oz / dist;
-                                    const sideZ = ox / dist;
+                                    const sideX = desiredDirZ;
+                                    const sideZ = -desiredDirX;
                                     steerX += sideX * 0.9;
                                     steerZ += sideZ * 0.9;
 
@@ -16763,15 +16685,15 @@ function animate() {
                                 } else if (!otherIsMoving) {
                                     // The person ahead is standing still (inspecting or waiting in line)
                                     // Steer around them smoothly towards open walkable side
-                                    const canSteerRight = !checkWhiskerObstacle(child.body.position.x, child.body.position.z, currentAngle + 0.8, 1.0);
+                                    const canSteerRight = !blockedAt(currentAngle + 0.8, 1.0);
                                     const sign = canSteerRight ? 1 : -1;
-                                    const sideX = -oz / dist;
-                                    const sideZ = ox / dist;
+                                    const sideX = desiredDirZ;
+                                    const sideZ = -desiredDirX;
                                     steerX += sideX * 0.9 * sign;
                                     steerZ += sideZ * 0.9 * sign;
 
                                     // Slow down if directly behind them
-                                    speedThrottle = Math.min(speedThrottle, Math.max(0.0, (fwdDist - 0.8) / 1.1));
+                                    speedThrottle = Math.min(speedThrottle, Math.max(0.35, (fwdDist - 0.8) / 1.1));
                                 } else {
                                     // Following someone in front: match speed / maintain safety distance
                                     speedThrottle = Math.min(speedThrottle, Math.max(0.2, (fwdDist - 0.9) / 1.1));
@@ -16830,10 +16752,17 @@ function animate() {
                     child.lastProgressTime = now;
                     if (child.lastProgressPos) {
                         const moved = Math.hypot(child.body.position.x - child.lastProgressPos.x, child.body.position.z - child.lastProgressPos.z);
-                        if (moved < 0.10 && child.behaviorState === 'navigating') {
+                        if (moved < 0.10 && (child.behaviorState === 'navigating' || child.journey)) {
                             child.stuckCount = (child.stuckCount || 0) + 1;
                             if (child.stuckCount >= 2) {
-                                setCustomerTarget(child);
+                                if (!child.journey) {
+                                    // Repath to the SAME queue slot, not a fresh
+                                    // random target or the back of the line.
+                                    if (child.checkoutQueued && child.nav?.target) {
+                                        child.nav.path = findPath(navGrid, child.body.position, child.nav.target, { strict: true });
+                                        child.nav.waypointIdx = 0;
+                                    } else setCustomerTarget(child);
+                                }
                                 child.stuckCount = 0;
                             }
                         } else {
@@ -16848,7 +16777,7 @@ function animate() {
 
         // Sync 3D group visual position to Cannon physics body
         child.position.x = child.body.position.x;
-        child.position.y = child.body.position.y - 0.9;
+        child.position.y = child.body.position.y - (child.groundBodyY || 0.9);
         child.position.z = child.body.position.z;
         // Customers who lose it during the nuke siren bounce around frantically
         if (child.nukeMode === 'crazy') child.position.y += Math.abs(Math.sin(now * 0.014 + (child.animPhase || 0))) * 0.4;
@@ -16894,7 +16823,7 @@ function animate() {
         child.rightLeg.rotation.x = Math.sin(t * 5.2 + Math.PI) * swing;
 
         // Rare customer question encounter with player
-        if (!customerQuestionInProgress && !tweakerRequestOpen && !child.interacting && !child.scufflePartner &&
+        if (!customerQuestionInProgress && !tweakerRequestOpen && !child.interacting && !child.scufflePartner && !child.journey && !child.checkoutQueued &&
             now > (child.nextQuestionAt || 0) && playerBody &&
             gameStarted && !isCheckout && !gamePaused && !gameOver && !introCutsceneActive && child.visible !== false &&
             (CONFIG.CUSTOMER_QUESTION_CHANCE ?? 2.5) > 0) {
@@ -18850,6 +18779,7 @@ function ensureTwoInOneItemExists() {
 }
 
 function hardStopGame() {
+    shopperTraffic = null;
     if (checkoutConveyor) teardownCheckoutPanel();
     paidGroceryBags?.dispose(); paidGroceryBags = null;
     stopRunTrack();
@@ -19128,7 +19058,8 @@ async function startNewGameInner() {
     // Add customers and store worker (only if not in Lonely Store mode)
     if (!isLonelyStoreMode) {
         for (let i = 0; i < 12; i++) {
-            createCustomer();
+            const cust = createCustomer();
+            if (i >= 8) shopperTraffic?.scheduleArrival(cust, 2 + (i - 8) * 4);
         }
         createStoreWorker();
     }
@@ -21372,6 +21303,9 @@ function cleanupSessionResources() {
         } catch(_) {}
     });
     customers = [];
+    shopperTraffic = null;
+    parkingLotCars = [];
+    carInstancedMeshes = {};
     obstacles = [];
     thief = null;
     policeCarModel = null;
@@ -21700,11 +21634,11 @@ function showShoppingCompleteOverlay(statsHtml, bestTimeMessage = "", runMetrics
 
     const finalTimeStr = timerElement ? (timerElement.textContent || '00:00:00.00') : '00:00:00.00';
     const shoppingCardHtml = `
-        <div style="background: rgba(16, 185, 129, 0.15); border-radius: 14px; padding: 14px 18px; margin: 12px 0 16px; border: 1px solid rgba(16, 185, 129, 0.4); text-align: center;">
+        <div class="shopping-summary-card">
             <div style="font-size: 0.85rem; font-weight: 800; color: #6ee7b7; letter-spacing: 0.1em; text-transform: uppercase;">
                 🛒 FINAL SHOPPING TIME
             </div>
-            <div style="font-size: 2.2rem; font-family: monospace; font-weight: 900; color: #34d399; letter-spacing: 0.05em; text-shadow: 0 0 15px rgba(52, 211, 153, 0.5); margin: 4px 0;">
+            <div class="shopping-summary-time">
                 ${finalTimeStr}
             </div>
             <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 8px; font-size: 0.85rem; margin-top: 4px; opacity: 0.95; color: #cbd5e1;">
@@ -21721,7 +21655,7 @@ function showShoppingCompleteOverlay(statsHtml, bestTimeMessage = "", runMetrics
             <div class="store-closed-title">${title}</div>
             <div class="store-closed-subtitle">${subtitle}</div>
             ${shoppingCardHtml}
-            <div class="store-closed-stats">
+            <div class="store-closed-stats" tabindex="0" role="region" aria-label="Shopping run statistics">
                 ${statsHtml}${bestTimeMessage}
             </div>
             ${seedBadgeHtml(currentRunSeed)}
