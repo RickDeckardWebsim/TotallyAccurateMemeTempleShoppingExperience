@@ -1,5 +1,5 @@
-// Transactional checkout: real groceries into sealed three-item bags.
-// Every bag shares one low-poly geometry/material; no extra physics world.
+// Transactional checkout: unload the real groceries together, scan individually,
+// then return sealed three-item bags. Bags share one low-poly geometry/material.
 function bagAssets(THREE) {
     const positions=[], colors=[];
     const quad=(a,b,c,d,color)=>{for(const p of [a,b,c,a,c,d]){positions.push(...p);colors.push(...color);}};
@@ -8,7 +8,6 @@ function bagAssets(THREE) {
     const bottom=ring(-0.21,0.16,0.19), top=ring(0.19,0.145,0.17);
     for(let i=0;i<4;i++)quad(bottom[i],bottom[(i+1)%4],top[(i+1)%4],top[i],paper);
     quad(...[...bottom].reverse(),paper);quad(...top,paper);
-    // Flat loop handles instead of high-segment toruses or transparency.
     for(const z of [-0.12,0.12]){
         const outer=[[-0.10,0.19,z],[-0.10,0.34,z],[0.10,0.34,z],[0.10,0.19,z]];
         const inner=[[-0.065,0.19,z],[-0.065,0.305,z],[0.065,0.305,z],[0.065,0.19,z]];
@@ -21,20 +20,55 @@ function bagAssets(THREE) {
     return {geometry,material:new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide})};
 }
 
+const UNLOAD_SECONDS=0.9, STAFF_GRACE_SECONDS=1.5, BAGGED_DEADLINE_SECONDS=9;
+// The remaining second covers payment, UI handoff and ordinary frame rounding.
 export function createCheckoutConveyor({THREE,scene,cart,counter,items,removeBody,
     restoreBody,onScan,onProgress,basket={floorY:0.511,halfW:0.49,halfL:0.742}}){
     const queue=[...new Set(items)].filter(item=>item?.inCart&&item.mesh?.parent===cart);
     const snapshots=queue.map(item=>({item,position:item.mesh.position.clone(),
         quaternion:item.mesh.quaternion.clone(),scale:item.mesh.scale.clone(),visible:item.mesh.visible}));
     const assets=bagAssets(THREE),bags=[];
-    const start=new THREE.Vector3(),belt=new THREE.Vector3(),scanner=new THREE.Vector3();
-    const bagPoint=new THREE.Vector3(),bagEnd=new THREE.Vector3(),bagStart=new THREE.Vector3();
-    const upright=new THREE.Quaternion(),worldQuat=new THREE.Quaternion(),bounds=new THREE.Box3();
-    let index=0,current=null,phase='item',elapsed=0,scanned=0,elapsedTotal=0;
+    const scanner=new THREE.Vector3(),scanStart=new THREE.Vector3(),bagPoint=new THREE.Vector3();
+    const bagEnd=new THREE.Vector3(),bagStart=new THREE.Vector3(),bounds=new THREE.Box3(),size=new THREE.Vector3();
+    const upright=counter.getWorldQuaternion(new THREE.Quaternion());
+    let index=0,current=null,phase='item',elapsed=0,scanned=0,elapsedTotal=0,processingAt=null,rate=1;
     let disposed=false,committed=false,released=false,activeBag=null,returned=0;
-    // ~1 second/item normally. Compress big carts to a 22-second total budget,
-    // including cashier arrival, without discarding elapsed time at low FPS.
-    const work=queue.length*0.78+Math.ceil(queue.length/3)*0.42;
+    const work=queue.length*0.42+Math.ceil(queue.length/3)*0.20;
+
+    // Measure once, suspend basket bodies, and reuse the original meshes.
+    let maxW=0.01,maxD=0.01,maxH=0.01;
+    for(const saved of snapshots){
+        const mesh=saved.item.mesh;
+        saved.from=mesh.getWorldPosition(new THREE.Vector3());
+        saved.fromQuat=mesh.getWorldQuaternion(new THREE.Quaternion());
+        removeBody(saved.item);scene.attach(mesh);saved.worldScale=mesh.scale.clone();
+        mesh.position.set(0,0,0);mesh.quaternion.identity();bounds.setFromObject(mesh);
+        bounds.getSize(size);maxW=Math.max(maxW,size.x);maxD=Math.max(maxD,size.z);maxH=Math.max(maxH,size.y);
+        saved.offset=new THREE.Vector3(-(bounds.min.x+bounds.max.x)/2,-bounds.min.y,-(bounds.min.z+bounds.max.z)/2);
+        saved.target=new THREE.Vector3();
+        mesh.position.copy(saved.from);mesh.quaternion.copy(saved.fromQuat);mesh.visible=true;
+        saved.item.checkoutTransit=true;
+    }
+    // Keep normal-sized carts at their real scale. Extremely overfilled carts
+    // compact only the temporary belt display so piles don't cross the ceiling.
+    let compact=1,columns=1,rows=1;
+    for(let attempt=0;attempt<48;attempt++){
+        columns=Math.max(1,Math.floor(2.9/(maxW*compact+0.035)));
+        rows=Math.max(1,Math.floor(1.0/(maxD*compact+0.035)));
+        const layers=Math.ceil(queue.length/(columns*rows));
+        if(maxW*compact<=2.9&&maxD*compact<=1.0&&layers*(maxH*compact+0.015)<=1.7)break;
+        compact*=0.9;
+    }
+    const cellW=maxW*compact+0.035,cellD=maxD*compact+0.035,cellH=maxH*compact+0.015;
+    function arrangeWaiting(){
+        for(let i=index;i<snapshots.length;i++){
+            const saved=snapshots[i],slot=i-index,column=Math.floor(slot/rows)%columns,row=slot%rows,layer=Math.floor(slot/(columns*rows));
+            counter.localToWorld(saved.target.set(-0.55+cellW*(column+0.5)+saved.offset.x*compact,
+                1.01+layer*cellH+saved.offset.y*compact,
+                0.15+(row-(rows-1)/2)*cellD+saved.offset.z*compact));
+        }
+    }
+    arrangeWaiting();
     function newBag(){
         const mesh=new THREE.Mesh(assets.geometry,assets.material);
         const contents=new THREE.Group();contents.visible=false;mesh.add(contents);
@@ -43,18 +77,14 @@ export function createCheckoutConveyor({THREE,scene,cart,counter,items,removeBod
     }
     function beginItem(){
         if(!activeBag)activeBag=newBag();
-        const saved=snapshots[index],item=saved.item;current={...saved,scanned:false};
-        item.mesh.getWorldPosition(start);item.mesh.getWorldQuaternion(worldQuat);
-        removeBody(item);scene.attach(item.mesh);item.checkoutTransit=true;
-        item.mesh.visible=true;item.mesh.quaternion.identity();bounds.setFromObject(item.mesh);
-        const offset=item.mesh.position.y-bounds.min.y;
-        counter.localToWorld(belt.set(2.25,1.009+offset,0.15));
-        counter.localToWorld(scanner.set(-0.95,1.037+offset,0.15));
+        current={...snapshots[index],scanned:false};current.item.mesh.getWorldPosition(scanStart);
+        counter.localToWorld(scanner.set(-0.95+current.offset.x*compact,1.037+current.offset.y*compact,0.15+current.offset.z*compact));
         activeBag.mesh.getWorldPosition(bagPoint);bagPoint.y+=0.1;
     }
     function putInBag(){
         const item=current.item;activeBag.contents.add(item.mesh);item.mesh.visible=false;
-        item.checkoutTransit=false;item.checkoutBag=activeBag;activeBag.items.push(item);current=null;index++;
+        item.mesh.scale.copy(current.scale);item.checkoutTransit=false;item.checkoutBag=activeBag;
+        activeBag.items.push(item);current=null;index++;arrangeWaiting();
         if(activeBag.items.length===3||index===queue.length){
             phase='bag';activeBag.mesh.getWorldPosition(bagStart);const slot=bags.length-1;
             cart.localToWorld(bagEnd.set((slot%2?1:-1)*Math.min(0.21,basket.halfW-0.17),
@@ -76,19 +106,37 @@ export function createCheckoutConveyor({THREE,scene,cart,counter,items,removeBod
         get done(){return returned===queue.length&&!current&&phase==='item';},
         get total(){return queue.length;},get item(){return current?.item||null;},
         get bags(){return bags;},get elapsed(){return elapsedTotal;},
-        get registerFallback(){return elapsedTotal>=10;},
+        get unloading(){return elapsedTotal<UNLOAD_SECONDS;},
+        get registerFallback(){return elapsedTotal>=STAFF_GRACE_SECONDS;},
         update(delta,ready,speed=1){
             if(disposed||this.done)return;
             const dt=Math.max(0,Number.isFinite(delta)?delta:0),previous=elapsedTotal;elapsedTotal+=dt;
-            // Never softlock payment on a physically blocked worker. The register
-            // auto-scans after 10 seconds; the attendant still walks his real route.
-            if(!ready&&elapsedTotal<10)return;
-            const activeDt=ready?dt:elapsedTotal-Math.max(previous,10);
-            const rate=Math.max(1,work/Math.max(1,22-Math.min(previous,10)))*Math.max(1,Math.min(3,speed));
-            let remaining=activeDt*rate;
+            // All groceries go onto the belt immediately, independently of staff.
+            const blend=1-Math.exp(-dt*14);
+            for(let i=index;i<snapshots.length;i++){
+                const saved=snapshots[i],mesh=saved.item.mesh;if(current?.item===saved.item)continue;
+                mesh.scale.copy(saved.worldScale).multiplyScalar(compact);
+                if(previous<UNLOAD_SECONDS){
+                    const delay=(i/Math.max(1,queue.length))*0.18;
+                    const t=Math.max(0,Math.min(1,(elapsedTotal-delay)/(UNLOAD_SECONDS-0.18))),ease=t*t*(3-2*t);
+                    mesh.position.lerpVectors(saved.from,saved.target,ease);mesh.position.y+=Math.sin(t*Math.PI)*0.55;
+                    mesh.quaternion.slerpQuaternions(saved.fromQuat,upright,ease);
+                }else{mesh.position.lerp(saved.target,blend);mesh.quaternion.copy(upright);}
+            }
+            let activeDt=dt;
+            if(processingAt===null){
+                const gate=ready?UNLOAD_SECONDS:STAFF_GRACE_SECONDS;
+                if(elapsedTotal<gate)return;
+                processingAt=ready?Math.max(UNLOAD_SECONDS,Math.min(previous,STAFF_GRACE_SECONDS)):STAFF_GRACE_SECONDS;
+                rate=Math.max(1,work/(BAGGED_DEADLINE_SECONDS-processingAt));
+                activeDt=elapsedTotal-processingAt;
+            }
+            // If the attendant is still travelling, auto-scan at 1.5 s rather
+            // than extending the ten-second checkout. His route stays physical.
+            let remaining=activeDt*rate*Math.max(1,Math.min(3,speed));
             while(remaining>1e-8&&!this.done){
                 if(phase==='item'&&!current)beginItem();
-                const duration=phase==='bag'?0.42:0.78;
+                const duration=phase==='bag'?0.20:0.42;
                 const step=Math.min(remaining,duration-elapsed);elapsed+=step;remaining-=step;
                 const t=elapsed/duration,ease=t*t*(3-2*t);
                 if(phase==='bag'){
@@ -100,13 +148,13 @@ export function createCheckoutConveyor({THREE,scene,cart,counter,items,removeBod
                     }
                 }else{
                     const mesh=current.item.mesh;
-                    if(t<0.25){
-                        const u=t/0.25;mesh.position.lerpVectors(start,belt,u);mesh.position.y+=Math.sin(u*Math.PI)*0.55;
-                        mesh.quaternion.slerpQuaternions(worldQuat,upright,u);
-                    }else if(t<0.7){mesh.position.lerpVectors(belt,scanner,(t-0.25)/0.45);mesh.quaternion.copy(upright);}
-                    else{
+                    if(t<0.6){
+                        const u=t/0.6;mesh.position.lerpVectors(scanStart,scanner,u);mesh.position.y+=Math.sin(u*Math.PI)*0.08;
+                        mesh.quaternion.copy(upright);
+                    }else{
                         if(!current.scanned){current.scanned=true;scanned++;onScan(current.item);onProgress(scanned,returned,queue.length);}
-                        const u=(t-0.7)/0.3;mesh.position.lerpVectors(scanner,bagPoint,u);mesh.position.y+=Math.sin(u*Math.PI)*0.25;
+                        const u=Math.max(0,(t-0.68)/0.32);
+                        mesh.position.lerpVectors(scanner,bagPoint,u);mesh.position.y+=Math.sin(u*Math.PI)*0.25;
                     }
                     if(elapsed>=duration-1e-8){putInBag();elapsed=0;}
                 }

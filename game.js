@@ -17145,7 +17145,7 @@ function animate() {
         checkoutConveyor.update(delta, ready && !checkoutBusyActive, crazyScannerActive ? 2.3 : 1);
         if (!ready && !checkoutConveyor.done) {
             const status = document.getElementById('checkout-status');
-            if (status) status.textContent = checkoutConveyor.registerFallback
+            if (status) status.textContent = checkoutConveyor.unloading ? 'Unloading groceries onto the belt…' : checkoutConveyor.registerFallback
                 ? 'Automatic register scanning while the attendant arrives. Bagging in threes.'
                 : 'Attendant hurrying to the register…';
         }
