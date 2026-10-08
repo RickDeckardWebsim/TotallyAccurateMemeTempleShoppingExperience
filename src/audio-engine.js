@@ -11,7 +11,8 @@
 //    itself (cloneNode is cheap), loops loop without a gap, and a sound that isn't listed (new, say) loads
 //    and decodes its own file on its first play.
 //  - Music and other long MP3s ({stream: true}) stream from an <audio> element, routed through a gain node,
-//    so they don't sit decoded in memory.
+//    so they don't sit decoded in memory. Short cinematic clips use the unlocked
+//    buffer path instead; their temporary decoded buffers are released on exit.
 //  - Volume is a gain node in both cases. iPhones ignore <audio>.volume entirely (every sound
 //    plays at full level there, fades and distance included); a gain node works everywhere.
 //  - Two pools: plain sounds (UI, the player's own) and spatial ones ({spatial: true}), which sit at a
@@ -141,6 +142,8 @@ function setPos(node, p) {
 class BufferSound {
     constructor(src, opts = {}) {
         this.src = src;
+        this.cinematic = !!opts.cinematic;
+        this.ephemeral = !!opts.ephemeral;
         // spatial: true, or {refDistance, rolloff, maxDistance}; position: {x, y, z} (setPosition)
         this.spatial = opts.spatial ? (opts.spatial === true ? {} : opts.spatial) : null;
         this.position = opts.position || null;
@@ -153,6 +156,7 @@ class BufferSound {
         this._duration = NaN;
         this._rate = 1;
         this._want = 0;       // play() calls waiting for the decode (a pause() in between cancels them)
+        if (opts.preload === 'auto') segmentFor(src).catch(() => {});
         // (a sound in sfx/pack.mp3 is decoded with it, at page load; any other on its first play)
     }
     get duration() { return this._duration; }
@@ -195,7 +199,13 @@ class BufferSound {
         if (this._voice) { this._offset = this.currentTime; this._stopVoice(); }
         this.paused = true;
     }
-    cloneNode() { const c = new BufferSound(this.src, { loop: this.loop, volume: this._volume, spatial: this.spatial, position: this.position }); c.muted = this._muted; return c; }
+    cloneNode() { const c = new BufferSound(this.src, { loop: this.loop, volume: this._volume, spatial: this.spatial, position: this.position, cinematic: this.cinematic, ephemeral: this.ephemeral }); c.muted = this._muted; return c; }
+    release() {
+        this.pause();
+        if (this.ephemeral) {
+            decoded.delete(this.src); segments.delete(this.src); fetched.delete(this.src);
+        }
+    }
     _start() {
         segmentFor(this.src).then(({ b, start, dur }) => {
             if (this.paused || this._voice) return;
@@ -212,8 +222,8 @@ class BufferSound {
                 panner.refDistance = this.spatial.refDistance ?? 4; panner.rolloffFactor = this.spatial.rolloff ?? 1;
                 panner.maxDistance = this.spatial.maxDistance ?? 80;
                 setPos(panner, this.position);
-                gain.connect(panner); panner.connect(bus);
-            } else gain.connect(bus);
+                gain.connect(panner); panner.connect(this.cinematic ? cinematicBus : bus);
+            } else gain.connect(this.cinematic ? cinematicBus : bus);
             const offset = this._offset >= dur ? 0 : this._offset;
             const voice = { source, gain, panner, startedAt: ctx.currentTime, offset, dur, owner: this };
             const pool = POOLS[this.spatial ? 'spatial' : 'plain'];
@@ -250,7 +260,7 @@ class BufferSound {
             gain.gain.setValueAtTime(this._level(), t);
             gain.gain.setValueAtTime(this._level(), t + len * 0.85);
             gain.gain.linearRampToValueAtTime(0, t + len); // (a slice can end mid-sound: fade, don't click)
-            source.connect(gain); gain.connect(bus);
+            source.connect(gain); gain.connect(this.cinematic ? cinematicBus : bus);
             const voice = { source, gain, panner: null, owner: { _voice: null } }, pool = POOLS.plain;
             source.onended = () => { const k = pool.live.indexOf(voice); if (k >= 0) pool.live.splice(k, 1); try { gain.disconnect(); } catch (_) {} };
             source.start(t, at + from, span);
@@ -319,7 +329,7 @@ class StreamSound {
     }
 }
 
-/** A sound for `src`. opts: {volume, loop, stream, spatial, position, cinematic, preload} — cinematic applies to streams only. */
+/** A sound for `src`. opts: {volume, loop, stream, spatial, position, cinematic, preload, ephemeral}. */
 export function createSound(src, opts = {}) {
     if (!ctx) { const a = new Audio(src); a.loop = !!opts.loop; a.volume = Math.min(1, opts.volume ?? 1); a.release = () => { a.pause(); a.removeAttribute('src'); a.load(); }; return a; }
     return opts.stream && !isPacked(src) ? new StreamSound(src, opts) : new BufferSound(src, opts);

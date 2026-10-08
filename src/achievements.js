@@ -17,6 +17,7 @@ const ACHIEVEMENTS = [
     { id: 'klutz', icon: '🤕', name: 'Klutz', desc: 'Trip 25 times', goal: 25 },
     { id: 'butterfingers', icon: '🥚', name: 'Butterfingers', desc: 'Drop 50 items', goal: 50 },
     { id: 'lonely', icon: '🏚️', name: 'Is Anybody There?', desc: 'Find the Lonely Store', secret: true },
+    { id: 'heaven', icon: '👼', name: 'You Have Come Home', desc: 'Reach heaven after slipping in a spill', secret: true },
     { id: 'shoplift', icon: '🚓', name: 'Five Finger Discount', desc: 'Shoplift' },
     { id: 'nukeSurvivor', icon: '☢️', name: 'Duck and Cover', desc: 'Survive the nuclear fallout', secret: true }
 ];

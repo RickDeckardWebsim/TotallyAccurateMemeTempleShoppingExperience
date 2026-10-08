@@ -25,7 +25,8 @@ import * as CartPhys from './src/cart-physics.js';
 import { updateSpillTracks, clearSpillTracks } from './src/spill-tracks.js';
 import { planStoreShelves, getShelfTierPools, SHELF_WIDTH, blocksStoreRoute, shelfFrontsReachable } from './src/store-layout.js';
 import { addStoreWayfinding } from './src/store-signs.js';
-import { addShelfDetails, clearShelfDetails } from './src/shelf-details.js';
+import { addShelfDetails, clearShelfDetails, refreshShelfPrices, recordShelfPriceTicket } from './src/shelf-details.js';
+import { itemPriceForRun } from './src/item-prices.js';
 import { createManagerAI, MANAGER, sightFraction } from './src/manager-ai.js';
 import { rollManagerSurvey, answerManagerSurvey, advanceManagerSurvey, getManagerFeedbackPenalty } from './src/manager-survey.js';
 import { dressCustomer } from './src/customer-skins.js';
@@ -9733,6 +9734,7 @@ function placeItemsOnShelf(shelfUnit, x, y, z, width, depth, direction, rotation
 
         if (shelfUnit && itemObj) {
             shelfUnit.userData.items.push(itemObj);
+            recordShelfPriceTicket(shelfUnit, shelfLevel % 4, localX, itemObj);
             storeStockCounts[itemTemplate.name] = (storeStockCounts[itemTemplate.name] || 0) + 1;
         }
     }
@@ -12423,14 +12425,7 @@ function getItemIcon(name) {
 let priceBook = new Map();
 function derivePriceForItem(name) {
     if (priceBook.has(name)) return priceBook.get(name);
-    // Base by category
-    const base = {
-        'Milk':2.99,'Bread':2.49,'Eggs':3.49,'Cereal':4.99,'Apples':1.29,'Bananas':0.79,
-        'Cleaning Supplies':5.49,'Soda':1.49,'Pasta':1.99,'Pasta Sauce':3.29,'Water bottles':3.99,
-        'Sugar':2.19,'Towels':2.99,'Peanut Butter':3.99,'Steak':12.99,'Chicken':8.99,
-        'Potatoes':3.49,'Canned Goods':1.49,'Gum':1.29,'2 in 1 Item':0.00
-    }[name] ?? 2.5;
-    const price = Math.max(0.5, base * (0.9 + Math.random()*0.2)); // ±10%
+    const price = itemPriceForRun(name, currentRunSeed?.runId);
     priceBook.set(name, price);
     return price;
 }
@@ -14847,6 +14842,7 @@ function restockItemOnShelf(shelfUnit) {
             door.itemsInside.push(itemObj);
         }
         storeStockCounts[itemTemplate.name] = (storeStockCounts[itemTemplate.name] || 0) + 1;
+        recordShelfPriceTicket(shelfUnit, tierIdx, localX, itemObj);
         
         // Notification
         displayMessage(`Store worker restocked ${itemTemplate.name}!`, 2200);
@@ -19008,6 +19004,8 @@ async function startNewGameInner() {
     resetAllMechanicsState();
     // Seal this run's ruleset into its seed before anything can roll events.
     currentRunSeed = createRunSeed(CONFIG, isCustomGame);
+    priceBook.clear();
+    refreshShelfPrices(derivePriceForItem);
     // Choose which batch of items this game will use (50/50 base vs alternate)
     chooseItemBatch();
 
@@ -20955,6 +20953,7 @@ function beginPlayerHeaven() {
         parent: document.getElementById('game-container'), volume: CONFIG.SFX_VOLUME ?? 0.7, muted: audioMuted,
         createSound, getMusicVolume: () => CONFIG.MUSIC_VOLUME ?? 0.5, isMusicMuted: () => musicMuted || audioMuted,
         onReturn: returnFromPlayerHeaven,
+        onArrive: () => unlockAchievement('heaven'),
         onMenu: () => { hardStopGame(); stopMenuMusic(); stopFailMusic(); showMainMenu(); }
     });
     return true;

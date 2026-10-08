@@ -13,7 +13,7 @@ export function rollPlayerHeaven(random = Math.random, chancePercent = HEAVEN_CH
 // A separate, lazy scene: no store physics, NPCs, shadows, network generation,
 // new renderer, or post-processing while heaven is on screen.
 export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemName, itemModel,
-    parent, onReturn, onMenu, volume = 0.7, muted = false, random = Math.random,
+    parent, onReturn, onMenu, onArrive = () => {}, volume = 0.7, muted = false, random = Math.random,
     createSound, getMusicVolume = () => 0.5, isMusicMuted = () => muted }) {
     let elapsed = 0, phase = 'rising', scene = null, camera = null, idol = null;
     let disposed = false, spoken = false, utterance = null, heavenTime = 0, lastAspect = 0, idolWidth = 0;
@@ -50,10 +50,11 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
         const musicVolume = Number.isFinite(rawVolume) ? Math.max(0, Math.min(1, rawVolume)) : 0.5;
         if (!ascentMusic && !musicMuted && musicVolume > 0) {
             try {
-                // Just two streamed clips per event. Prefetch the small choir
-                // during the rise, never decode it into a long PCM buffer.
-                ascentMusic = createSound('sfx/heaven-ascent.mp3', { stream: true, cinematic: true, loop: true, volume: 0 });
-                heavenMusic = createSound('sfx/heaven-choir.mp3', { stream: true, cinematic: true, preload: 'auto', loop: false, volume: 0 });
+                // These short clips use the already-unlocked Web Audio context,
+                // not autoplay of new media elements from a spill timer. Only
+                // this event decodes them; release drops both buffers on exit.
+                ascentMusic = createSound('sfx/heaven-ascent.mp3', { cinematic: true, ephemeral: true, loop: true, volume: 0 });
+                heavenMusic = createSound('sfx/heaven-choir.mp3', { cinematic: true, ephemeral: true, preload: 'auto', loop: false, volume: 0 });
                 heavenMusic.onended = () => { if (!disposed) choirFinished = true; };
             } catch (_) { stopMusic(); musicUnavailable = true; return; }
         }
@@ -330,6 +331,7 @@ export function createPlayerHeaven({ THREE, ceilingHeight, cameraStartY, itemNam
                 fade.style.opacity = String(Math.max(0, Math.min(1, (y - ceilingHeight) / 0.75)));
                 if (y >= ceilingHeight + 0.75) {
                     buildHeaven(); phase = 'heaven'; heavenTime = elapsed;
+                    onArrive();
                 }
             }
             if (phase === 'heaven') {

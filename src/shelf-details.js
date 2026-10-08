@@ -1,24 +1,11 @@
 import * as THREE from 'three';
+import { ITEM_BASE_PRICES } from './item-prices.js';
 
 // Entirely cosmetic: one opaque, unshadowed draw per fixture, one shared 1024 x
-// 512 atlas. No game RNG, price-book calls, collision bodies, interaction cache
+// 512 atlas. No game RNG, collision bodies, interaction cache
 // entries, per-frame work, or changes to stock. Labels stay like real shelf tags
-// when a product is taken/restocked. Printed prices are explicitly guide prices.
-const GUIDE_PRICES = {
-    'Milk': 2.99, 'Bread': 2.49, 'Eggs': 3.49, 'Cereal': 4.99,
-    'Apples': 1.29, 'Bananas': 0.79, 'Cleaning Supplies': 5.49,
-    'Soda': 1.49, 'Pasta': 1.99, 'Pasta Sauce': 3.29,
-    'Water bottles': 3.99, 'Sugar': 2.19, 'Towels': 2.99,
-    'Peanut Butter': 3.99, 'Steak': 12.99, 'Chicken': 8.99,
-    'Potatoes': 3.49, 'Canned Goods': 1.49, 'Gum': 1.29,
-    '2 in 1 Item': 0.50, 'Toilet paper': 2.50, 'Ice Cream': 2.50,
-    'Shampoo': 2.50, 'Orange Juice': 2.50, 'Lettuce': 2.50,
-    'Grapes': 2.50, 'Cooking oil': 2.50, 'Pizza': 2.50,
-    'Ketchup': 2.50, 'Mustard': 2.50, 'Batteries': 2.50,
-    'Dog food': 2.50, 'Cheese': 2.50, 'Pants': 2.50, 'Toys': 2.50,
-    'Chocolate bars': 2.50, 'Watermelon': 2.50, 'Flowers': 2.50,
-    'Coffee': 2.50
-};
+// when a product is taken. Restocks refresh only the affected fixture batch;
+// prices refresh once per run from the same cent-rounded checkout price book.
 const COLS = 8, TILE_W = 128, TILE_H = 64;
 let assets = null;
 const liveDetails = new Set();
@@ -40,22 +27,23 @@ function getAssets() {
         paint(ctx, index);
         ctx.restore();
     }
-    for (const [name, price] of Object.entries(GUIDE_PRICES)) {
-        tile(name, (c, index) => {
-            c.fillStyle = '#f7f3e4'; c.fillRect(0, 0, 128, 64);
-            c.fillStyle = index % 5 === 0 ? '#ead04c' : '#dde4da';
-            c.fillRect(3, 3, 122, 11);
-            c.fillStyle = '#283d32'; c.font = 'bold 8px Arial';
-            c.fillText(index % 5 === 0 ? 'VALUE  •  GUIDE PRICE' : 'MAGMART  •  GUIDE PRICE', 6, 11, 116);
-            c.fillStyle = '#242824'; c.font = 'bold 10px Arial';
-            c.fillText(name.toUpperCase(), 6, 26, 116);
-            c.font = 'bold 28px Arial'; c.fillText('$' + price.toFixed(2), 5, 53, 84);
-            // Printed barcode/SKU, not an interactive scanner target.
-            for (let bar = 0; bar < 12; bar++) {
-                if ((bar * 7 + index * 3) % 5 !== 0) c.fillRect(94 + bar * 2, 32, 1 + (bar % 2), 16);
-            }
-            c.font = '7px monospace'; c.fillText(String(14000 + index), 93, 57);
-        });
+    function paintPrice(name, price, c, index) {
+        c.fillStyle = '#f7f3e4'; c.fillRect(0, 0, 128, 64);
+        c.fillStyle = index % 5 === 0 ? '#ead04c' : '#dde4da';
+        c.fillRect(3, 3, 122, 11);
+        c.fillStyle = '#283d32'; c.font = 'bold 8px Arial';
+        c.fillText(index % 5 === 0 ? 'VALUE  •  UNIT PRICE' : 'MAGMART  •  UNIT PRICE', 6, 11, 116);
+        c.fillStyle = '#242824'; c.font = 'bold 10px Arial';
+        c.fillText(name.toUpperCase(), 6, 26, 116);
+        c.font = 'bold 28px Arial'; c.fillText('$' + price.toFixed(2), 5, 53, 84);
+        // Printed barcode/SKU, not an interactive scanner target.
+        for (let bar = 0; bar < 12; bar++) {
+            if ((bar * 7 + index * 3) % 5 !== 0) c.fillRect(94 + bar * 2, 32, 1 + (bar % 2), 16);
+        }
+        c.font = '7px monospace'; c.fillText(String(14000 + index), 93, 57);
+    }
+    for (const [name, price] of Object.entries(ITEM_BASE_PRICES)) {
+        tile(name, (c, index) => paintPrice(name, Math.max(0.5, price), c, index));
     }
     tile('rail', c => {
         c.fillStyle = '#9babb2'; c.fillRect(0, 0, 128, 64);
@@ -103,7 +91,7 @@ function getAssets() {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     const material = new THREE.MeshLambertMaterial({ map: texture });
-    assets = { tiles, material };
+    assets = { tiles, material, canvas, ctx, texture, paintPrice };
     // Three's object constructors generate UUIDs with Math.random. Warm a
     // bounded pool before any run starts, not between item/door/event rolls.
     // There are at most 16 fixture bays in the existing layout planner.
@@ -119,7 +107,7 @@ function getAssets() {
 export function addShelfDetails(unit, tierPositionsY, boardThickness, boardWidth, boardDepth, boardCenterZ) {
     const { width, height, depth, direction, isFreezer, tierStock, tierPools } = unit.userData;
     const { tiles } = getAssets();
-    const detail = fixturePool.find(mesh => !liveDetails.has(mesh));
+    const detail = unit.getObjectByName('shelf-cosmetic-details') || fixturePool.find(mesh => !liveDetails.has(mesh));
     if (!detail) return null; // Unexpected extra fixtures stay gameplay-identical.
     const positions = [], normals = [], uvs = [], indices = [];
     // All surfaces face the opening. Reverse vertex order, not UVs, on the -Z
@@ -144,12 +132,14 @@ export function addShelfDetails(unit, tierPositionsY, boardThickness, boardWidth
         const stock = tierStock?.[tier] || tierPools?.[tier] || [];
         const count = Math.min(tierStock?.[tier]?.length ?? 3, Math.floor((width - 1.2) / 1.1));
         const spacing = (width - 1.4) / (count + 1);
-        for (let slot = 0; slot < count; slot++) {
-            const item = stock[slot % stock.length];
-            if (!item) continue;
-            const x = -width / 2 + 0.7 + (slot + 1) * spacing;
-            face(item.name, x, tierY + boardThickness / 2 - 0.125,
-                frontZ + direction * 0.006, Math.min(0.76, spacing * 0.8), 0.21);
+        const tickets = unit.userData.priceTickets?.[tier] ?? Array.from({ length: count }, (_, slot) => ({
+            name: stock[slot % stock.length]?.name, x: -width / 2 + 0.7 + (slot + 1) * spacing
+        }));
+        const ticketWidth = Math.min(0.76, (width - 1.4) / (tickets.length + 1) * 0.8);
+        for (const ticket of tickets) {
+            if (!ticket.name) continue;
+            face(ticket.name, ticket.x, tierY + boardThickness / 2 - 0.125,
+                frontZ + direction * 0.006, ticketWidth, 0.21);
         }
     });
 
@@ -182,6 +172,9 @@ export function addShelfDetails(unit, tierPositionsY, boardThickness, boardWidth
         direction * (depth / 2 + 0.005), 0.52, 0.16);
 
     const geometry = detail.geometry;
+    // Release old GPU attributes before a rare restock rebuild, reusing the
+    // pooled geometry/mesh/material rather than leaking replaced buffers.
+    if (liveDetails.has(detail)) geometry.dispose();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -190,7 +183,33 @@ export function addShelfDetails(unit, tierPositionsY, boardThickness, boardWidth
     geometry.computeBoundingSphere();
     unit.add(detail);
     liveDetails.add(detail);
+    unit.userData.shelfDetailOptions = [tierPositionsY, boardThickness, boardWidth, boardDepth, boardCenterZ];
     return detail;
+}
+
+// Track the actual item rolled for each slot, not the first entries in a pool.
+// This metadata never changes placement, ownership, collisions or pickup rays.
+export function recordShelfPriceTicket(unit, tier, x, item) {
+    const rows = unit.userData.priceTickets ||= [];
+    const tickets = rows[tier] ||= [];
+    const vacant = tickets.filter(ticket => !ticket.item?.isStatic || ticket.item.inCart ||
+        !ticket.item.mesh?.parent || !ticket.item.mesh.visible).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+    const ticket = { name: item.name, x, item };
+    if (vacant) tickets[tickets.indexOf(vacant)] = ticket;
+    else if (tickets.length < 12) tickets.push(ticket);
+    const options = unit.userData.shelfDetailOptions;
+    if (options) addShelfDetails(unit, ...options);
+}
+
+export function refreshShelfPrices(getPrice) {
+    const { ctx, tiles, texture, paintPrice } = getAssets();
+    for (const name of Object.keys(ITEM_BASE_PRICES)) {
+        const index = tiles.get(name);
+        ctx.save(); ctx.translate((index % COLS) * TILE_W, Math.floor(index / COLS) * TILE_H);
+        ctx.beginPath(); ctx.rect(0, 0, TILE_W, TILE_H); ctx.clip();
+        paintPrice(name, getPrice(name), ctx, index); ctx.restore();
+    }
+    texture.needsUpdate = true;
 }
 
 export function clearShelfDetails() {
