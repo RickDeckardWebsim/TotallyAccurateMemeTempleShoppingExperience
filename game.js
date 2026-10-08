@@ -466,6 +466,7 @@ let heldItem = null;
 let heldItemPulling = false;
 let isCheckout = false;
 let checkoutConveyor = null, checkoutCameraRestore = null, checkoutRowsActive = [];
+let paidGroceryBags = null;
 let checkoutWorkerRequested = false;
 let gameStarted = false;
 let gameOver = false;
@@ -1379,6 +1380,7 @@ function resetAllMechanicsState() {
     walletFailed = false;
 
     // Reset collected items and shopping cart state
+    paidGroceryBags?.dispose(); paidGroceryBags = null;
     collectedItems = [];
     purchaseComplete = false;
     paidListSnapshot = null;
@@ -4118,6 +4120,8 @@ SQ.initSideQuests({
     get toilet() { return bathroomToilet; },
     get items() { return ITEMS; },
     get shoppingList() { return shoppingList; },
+    get groceryBags() { return paidGroceryBags?.bags || []; },
+    loadGroceryBag: bag => paidGroceryBags?.loadBag(bag),
     get purchaseComplete() { return purchaseComplete; },
     get gameStarted() { return gameStarted; },
     get gamePaused() { return gamePaused; },
@@ -4160,7 +4164,7 @@ function countWrongItemsInCart() {
 
 // Checkout confirmed. With side quests on, the run continues until you drive away.
 function completeGroceryPurchase() {
-    teardownCheckoutPanel();
+    teardownCheckoutPanel(true);
     endBusyCheckoutIfActive();
     if (!SQ.sideQuestsEnabled()) { endGame(); return; }
     purchaseWrongItemsCount = countWrongItemsInCart();
@@ -8664,13 +8668,17 @@ let leaderboardScreenCanvas = null;
 let leaderboardScreenTex = null;
 let leaderboardPollInterval = null;
 let latestLeaderboardData = { top_times: [], top_scores: [] };
+let leaderboardPage = 1, leaderboardPollSequence = 0;
 let currentRunSession = null;
 
 async function pollLeaderboard() {
+    const sequence = ++leaderboardPollSequence;
     try {
-        const res = await fetch('/api/leaderboard');
+        const res = await fetch(`/api/leaderboard?page=${leaderboardPage}&limit=50`, { cache: 'no-store' });
         if (res.ok) {
             const data = await res.json();
+            if (sequence !== leaderboardPollSequence) return;
+            leaderboardPage = data.page || 1;
             const rawList = Array.isArray(data.top_times) ? data.top_times : (Array.isArray(data.top_scores) ? data.top_scores : []);
             // Ensure 1 entry per unique user/username (keeping their best time)
             const seen = new Set();
@@ -8683,6 +8691,7 @@ async function pollLeaderboard() {
                 }
             }
             latestLeaderboardData = {
+                ...data,
                 top_times: uniqueList,
                 top_scores: uniqueList,
                 review_queue: data.review_queue,
@@ -8909,32 +8918,45 @@ function updateLeaderboardModalContent() {
     const scoresTbody = document.getElementById('leaderboard-scores-tbody');
     const statusLabel = document.getElementById('leaderboard-status-label');
 
-    const topTimesList = latestLeaderboardData.top_times || latestLeaderboardData.top_scores || [];
+    const topTimesList = latestLeaderboardData.entries || latestLeaderboardData.top_times || latestLeaderboardData.top_scores || [];
 
     if (statusLabel) {
-        statusLabel.textContent = `● Speedrun Database (${topTimesList.length} records) • Auto-syncing`;
+        statusLabel.textContent = `● Global v37+ leaderboard · ${latestLeaderboardData.total_players ?? topTimesList.length} ranked players · Auto-syncing`;
     }
+    const pageLabel = document.getElementById('leaderboard-page-label');
+    if (pageLabel) pageLabel.textContent = `${leaderboardPage} / ${latestLeaderboardData.pages || 1}`;
+    const prev = document.getElementById('leaderboard-prev-btn'), next = document.getElementById('leaderboard-next-btn');
+    if (prev) { prev.disabled = leaderboardPage <= 1; prev.onclick = () => { leaderboardPage--; pollLeaderboard(); }; }
+    if (next) { next.disabled = !latestLeaderboardData.has_more; next.onclick = () => { leaderboardPage++; pollLeaderboard(); }; }
+    const personal = document.getElementById('leaderboard-personal'), mine = latestLeaderboardData.my_best;
+    if (personal) personal.textContent = mine
+        ? `Your best: #${mine.rank} · ${mine.final_time} · ${mine.completion_percent}% list · ${mine.items_collected} items`
+        : latestLeaderboardData.my_status === 'pending_review' ? 'Your best run is awaiting review before entering the top ten.'
+        : latestLeaderboardData.my_status === 'unverified' ? 'Your run did not pass verification. Verified vanilla runs enter this shared leaderboard.'
+        : 'Complete a verified vanilla run to record your global best. Top-ten candidates require review.';
 
     if (scoresTbody) {
         if (topTimesList.length === 0) {
             scoresTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 24px;">No database speedruns recorded yet. Complete a shopping run to claim rank #1!</td></tr>`;
         } else {
             let html = '';
+            const escapeText = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
             topTimesList.forEach((entry, idx) => {
-                const rankClass = idx === 0 ? 'rank-1' : idx === 1 ? 'rank-2' : idx === 2 ? 'rank-3' : 'rank-other';
-                const rankLabel = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}`;
-                const avatarUrl = `https://images.websim.com/avatar/${entry.username}`;
+                const rank = entry.rank || (leaderboardPage - 1) * 50 + idx + 1;
+                const rankClass = rank <= 3 ? `rank-${rank}` : 'rank-other';
+                const rankLabel = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`;
+                const avatarUrl = `https://images.websim.com/avatar/${encodeURIComponent(entry.username || 'Shopper')}`;
                 
                 html += `
                     <tr>
                         <td><span class="rank-badge ${rankClass}">${rankLabel}</span></td>
                         <td>
                             <div class="player-cell">
-                                <img class="player-avatar-small" src="${avatarUrl}" alt="${entry.username}" onerror="this.src='uploads/webp/watercolor-abstract-background-free-png_256.webp';">
-                                <span style="font-weight: 700; color: #fff;">${entry.username || 'Shopper'}</span>
+                                <img class="player-avatar-small" src="${avatarUrl}" alt="${escapeText(entry.username)}" onerror="this.src='uploads/webp/watercolor-abstract-background-free-png_256.webp';">
+                                <span style="font-weight: 700; color: #fff;">${escapeText(entry.username || 'Shopper')}</span>
                             </div>
                         </td>
-                        <td><span class="leaderboard-time-val">${entry.final_time || '00:00.00'}</span></td>
+                        <td><span class="leaderboard-time-val">${escapeText(entry.final_time || '00:00.00')}</span></td>
                         <td><span style="color: ${(entry.completion_percent || 100) >= 100 ? '#60a5fa' : '#f59e0b'}; font-weight: 600;">${entry.completion_percent || 100}%</span></td>
                         <td><span style="font-family: monospace; font-size: 0.95em; color: #e2e8f0;">${entry.items_collected || 0} items</span></td>
                         <td>${entry.replay_video_url ? `<button type="button" class="lb-watch-btn" data-replay-idx="${idx}">▶ Watch</button>` : ''}${entry.seed ? `<button type="button" class="seed-copy" title="Copy run seed (dev)" data-seed-copy="${String(entry.seed).replace(/[^A-Za-z0-9._-]/g, '')}">🔑 Seed</button>` : ''}</td>
@@ -8948,7 +8970,7 @@ function updateLeaderboardModalContent() {
                 const btn = e.target.closest('.lb-watch-btn');
                 if (!btn) return;
                 const entry = topTimesList[Number(btn.dataset.replayIdx)];
-                if (entry && entry.replay_video_url) window.__replayWatch?.({ ...entry, rank: Number(btn.dataset.replayIdx) + 1 });
+                if (entry && entry.replay_video_url) window.__replayWatch?.({ ...entry, rank: entry.rank || Number(btn.dataset.replayIdx) + 1 });
             };
         }
     }
@@ -11394,6 +11416,10 @@ function setupEvents() {
         if (!CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() && (event.code === 'Digit1' || event.code === 'Numpad1')) setListPage('grocery');
         if (!CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() && (event.code === 'Digit2' || event.code === 'Numpad2')) setListPage('other');
 
+        // Register interaction is explicit, not gated by completing a hidden list.
+        if (event.code === kb.interact && gameplayInputReady() && !event.repeat &&
+            !heldItem && !aimedPlayerCart() && tryCheckoutInteraction()) return;
+
         // Side-quest interactions (toilet, info desk, samples, customers, car) come first
         const cartInteract = event.code === kb.interact && CONFIG.SIMPLIFIED_CONTROLS && gameplayInputReady() &&
             !heldItem && !SQ.capturesClick() && aimedPlayerCart();
@@ -12067,13 +12093,16 @@ function triggerTrip() {
     cartAttached = false;
 
     // Make all collected items fall out of the cart ONLY if it was attached at the moment of trip
-    if (wasAttached && collectedItems.length > 0) {
-        itemsFallenCount += collectedItems.length; // Increment items fallen count
-        addAchievementProgress('butterfingers', collectedItems.length);
+    // Paid, sealed bags retain their contents; never eject their hidden meshes
+    // separately and leave an empty bag still listed in the trunk manifest.
+    const looseCartItems = collectedItems.filter(item => !item.checkoutBag);
+    if (wasAttached && looseCartItems.length > 0) {
+        itemsFallenCount += looseCartItems.length; // Increment items fallen count
+        addAchievementProgress('butterfingers', looseCartItems.length);
         const cartPos = new THREE.Vector3();
         cartObject.getWorldPosition(cartPos);
         
-        collectedItems.forEach(item => {
+        looseCartItems.forEach(item => {
             // Make the item visible again
             item.mesh.visible = true;
 
@@ -12141,7 +12170,7 @@ function triggerTrip() {
         });
         
         // Clear the collected items array
-        collectedItems = [];
+        collectedItems = collectedItems.filter(item => item.checkoutBag);
         refreshGumCravingState();
         // Reset all shopping list collected counts since items fell out of attached cart
         shoppingList.forEach(item => {
@@ -12530,7 +12559,8 @@ function buildCheckoutPanel() {
     checkoutUIElement.classList.add('visible');
 }
 
-function teardownCheckoutPanel() {
+function teardownCheckoutPanel(commit = false) {
+    if (commit && checkoutConveyor?.done) paidGroceryBags = checkoutConveyor.commit();
     checkoutConveyor?.dispose(); checkoutConveyor = null; checkoutRowsActive = [];
     checkoutWorkerRequested = false;
     if (checkoutCameraRestore) {
@@ -12591,12 +12621,13 @@ function updateConveyorCheckoutProgress() {
     const confirmBtn = document.getElementById('btn-confirm');
     const total = checkoutRowsActive.reduce((n, row) => n + row.qty, 0);
     const scanned = checkoutRowsActive.reduce((n, row) => n + row.scannedQty, 0);
-    if (progressEl) progressEl.textContent = `${scanned} / ${total} scanned`;
+    if (progressEl) progressEl.textContent = `${scanned} / ${total} scanned${checkoutConveyor ? ` · ${checkoutConveyor.bags.filter(b => b.loaded).length} / ${Math.ceil(total / 3)} bags in cart` : ''}`;
     if (confirmBtn) confirmBtn.disabled = (!isLonelyStoreMode && !checkoutConveyor?.done) || scanned !== total || (gumCravingActive && !hasGumInCart());
     const status = document.getElementById('checkout-status');
     if (status) status.textContent = isLonelyStoreMode ? 'Click the receipt items to scan and escape.' : checkoutConveyor?.done
-        ? 'All groceries back in your cart. Confirm purchase when ready.'
-        : 'Attendant scanning and reloading your cart automatically.';
+        ? 'Groceries bagged (up to 3 per bag) and back in your cart. Completing payment…'
+        : 'Scanning one by one, bagging in threes, then loading your cart.';
+    if (!isLonelyStoreMode && checkoutConveyor?.done && confirmBtn && !confirmBtn.disabled && !purchaseComplete) confirmBtn.click();
 }
 
 // Lonely Store has no attendant and retains its entrance/register escape flow.
@@ -12640,6 +12671,29 @@ function populateCheckoutList() {
     checkoutRowsActive = rows;
     updateConveyorCheckoutProgress();
     return rows;
+}
+
+function tryCheckoutInteraction() {
+    if (!checkout || !playerBody || purchaseComplete || isCheckout) return false;
+    const p = playerBody.position, c = checkout.position;
+    // Checkout lane spans 6.2 m: reach from either end or the customer side.
+    if (Math.abs(p.x - c.x) > 5.5 || Math.abs(p.z - c.z) > 4.5) return false;
+    const direction = camera.getWorldDirection(new THREE.Vector3());
+    const toward = new THREE.Vector3(c.x - p.x, 0, c.z - p.z);
+    if (toward.lengthSq() > 0.25 && direction.x * toward.x + direction.z * toward.z < 0) return false;
+    sharedRaycaster.set(camera.position, direction);
+    if (findAccessibleItemUnderCrosshair(sharedRaycaster, CONFIG.ARM_REACH * 1.8) || aimedLooseMoney(sharedRaycaster)) return false;
+    if (checkoutButtonRequired && checkoutButton && !checkoutButton.pressed) pressCheckoutButton();
+    startCheckoutProcess();
+    return true;
+}
+
+function pressCheckoutButton() {
+    if (!checkoutButton || checkoutButton.pressed) return;
+    checkoutButton.pressed = true;
+    checkoutButton.mesh.children[1].material.color.set(0xFF0000);
+    checkoutButton.mesh.children[1].material.emissive.set(0xAA0000);
+    try { sfxKey.currentTime = 0; sfxKey.play(); } catch (_) {}
 }
 
 function startCheckoutProcess() {
@@ -12693,6 +12747,17 @@ function startCheckoutProcess() {
     if (noMoneyForGroceries) { walletFailed = true; endGame(); return; }
     if (tweakerMoneyRisk) { tweakerMoneyFailure = true; endGame(); return; }
 
+    // Keep the craving roll, but resolve it BEFORE accepting groceries. A late
+    // craving must not disable payment halfway through a sealed-bag transaction.
+    if (!isLonelyStoreMode && !gumCravingEvaluatedThisGame) {
+        gumCravingEvaluatedThisGame = true;
+        const chance = Number.isFinite(CONFIG.GUM_CRAVING_CHANCE) ? CONFIG.GUM_CRAVING_CHANCE : 35;
+        if (Math.random() * 100 < plus5PercentPercent(chance)) {
+            triggerGumCraving();
+            if (!hasGumInCart()) return;
+        }
+    }
+
     isCheckout = true;
     if (!isLonelyStoreMode) {
         checkoutCameraRestore = { position: camera.position.clone(), quaternion: camera.quaternion.clone(),
@@ -12710,7 +12775,7 @@ function startCheckoutProcess() {
 
     if (gumCravingActive) {
         refreshGumCravingState();
-    } else if (!gumCravingEvaluatedThisGame) {
+    } else if (isLonelyStoreMode && !gumCravingEvaluatedThisGame) {
         // Start 5-second timer at checkout: if player takes 5 seconds, craving chance is evaluated
         if (gumCravingTimeoutId) {
             try { clearTimeout(gumCravingTimeoutId); } catch(_) {}
@@ -12730,7 +12795,7 @@ function startCheckoutProcess() {
     const checkoutRows = populateCheckoutList();
     if (isLonelyStoreMode) wireLonelyCheckoutRows(checkoutRows);
     else checkoutConveyor = createCheckoutConveyor({ THREE, scene, cart: cart3D, counter: checkout,
-        items: collectedItems, removeBody: CartPhys.removeItemFromCart,
+        items: collectedItems, basket: CartPhys.CART_BASKET, removeBody: CartPhys.removeItemFromCart,
         restoreBody: (item, position, quaternion) => {
             CartPhys.addItemToCart(item, position, quaternion);
             item.cartBody?.sleep();
@@ -13258,13 +13323,7 @@ function grabItem() {
         if (buttonIntersection.length > 0) {
             const distance = buttonIntersection[0].distance;
             if (distance <= (unlimitedReach ? Infinity : CONFIG.ARM_REACH)) {
-                // Button pressed!
-                checkoutButton.pressed = true;
-                checkoutButton.mesh.children[1].material.color.set(0xFF0000); // Change to red
-                checkoutButton.mesh.children[1].material.emissive.set(0xAA0000);
-                
-                // Play button sound (reused)
-                try { sfxKey.currentTime = 0; sfxKey.play(); } catch(e) {}
+                pressCheckoutButton();
                 return;
             }
         }
@@ -13909,7 +13968,6 @@ function countObtainableInStore(name) {
 }
 
 function checkCheckoutReady() {
-    if (!isCheckout) checkoutWorkerRequested = false;
     if (!playerBody || !gameStarted || isCheckout || gameOver || gamePaused || purchaseComplete) return;
 
     if (isLonelyStoreMode) {
@@ -13932,30 +13990,16 @@ function checkCheckoutReady() {
     const distSq = dx*dx + dz*dz;
 
     if (distSq > 36) {
+        checkoutWorkerRequested = false;
         checkoutExitCooldownUntil = 0; // Clears cooldown when stepping away
     }
 
     if (Date.now() < checkoutExitCooldownUntil) return;
     if (distSq >= 25 || collectedItems.length === 0) return;
 
-    // Check if all items that are still obtainable in the store have been collected.
-    // Uses LIVE stock (not the initial stock count) so items stolen by the gnome
-    // thief, taken by customers, or pulled by an out-of-stock event can never
-    // make the run impossible to finish.
-    let allAvailableCollected = true;
-    for (const item of shoppingList) {
-        const maxCollectable = Math.min(item.quantity, item.collected + countObtainableInStore(item.name));
-        if (item.collected < maxCollectable) {
-            allAvailableCollected = false;
-            break;
-        }
-    }
-
-    if (allAvailableCollected) {
-        requestCheckoutWorker();
-        // Player is near the checkout and has gathered all obtainable list items
-        startCheckoutProcess();
-    }
+    requestCheckoutWorker();
+    // Normal checkout starts with Interact, rather than stealing controls merely
+    // for walking near a counter. Approach still summons the cashier early.
 }
 
 function triggerPowerOutage() {
@@ -14503,7 +14547,7 @@ function updateStoreWorker(delta) {
         w.boxMesh.visible = false;
         if (!checkoutWorkerReady()) {
             if (w.workerState !== 'checkout_return') requestCheckoutWorker();
-            stepWorkerAlongPath(w, delta, 3.8);
+            stepWorkerAlongPath(w, delta, 6.2);
         } else {
             w.workerState = 'idle_register';
             w.body.velocity.x = w.body.velocity.z = 0;
@@ -15983,6 +16027,12 @@ function animate() {
                 }
             }
             if (!hoveredItemName) hoveredItemName = SQ.getHoverText();
+            if (!hoveredItemName && !purchaseComplete && checkout &&
+                Math.abs(playerBody.position.x - checkout.position.x) <= 5.5 &&
+                Math.abs(playerBody.position.z - checkout.position.z) <= 4.5) {
+                const kb = { ...DEFAULT_KEYBINDS, ...(CONFIG.KEYBINDS || {}) };
+                hoveredItemName = `Checkout [${formatKeyName(kb.interact)} to scan & bag groceries]`;
+            }
             if (CONFIG.SIMPLIFIED_CONTROLS && contextualSlapTarget()) hoveredItemName = 'Customer [Click to slap • E to interact]';
             const aimedMoney = aimedLooseMoney(raycaster);
             if (aimedMoney) hoveredItemName = `$${(aimedMoney.cents / 100).toFixed(2)} [E to save]`;
@@ -17093,9 +17143,11 @@ function animate() {
     if (isCheckout && checkoutConveyor) {
         const ready = checkoutWorkerReady();
         checkoutConveyor.update(delta, ready && !checkoutBusyActive, crazyScannerActive ? 2.3 : 1);
-        if (!ready) {
+        if (!ready && !checkoutConveyor.done) {
             const status = document.getElementById('checkout-status');
-            if (status && status.textContent !== 'Attendant hurrying to the register…') status.textContent = 'Attendant hurrying to the register…';
+            if (status) status.textContent = checkoutConveyor.registerFallback
+                ? 'Automatic register scanning while the attendant arrives. Bagging in threes.'
+                : 'Attendant hurrying to the register…';
         }
         camera.position.set(checkout.position.x + 3.6, 3.4, checkout.position.z + 5.8);
         camera.lookAt(checkout.position.x - 0.1, 1.1, checkout.position.z + 0.15);
@@ -18798,6 +18850,8 @@ function ensureTwoInOneItemExists() {
 }
 
 function hardStopGame() {
+    if (checkoutConveyor) teardownCheckoutPanel();
+    paidGroceryBags?.dispose(); paidGroceryBags = null;
     stopRunTrack();
     Nuke.resetNuke();
     nukeContext = null;

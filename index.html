@@ -529,6 +529,7 @@
                     <span>⚡</span> MagMart Speedrun Leaderboard
                 </div>
             </div>
+            <div id="leaderboard-personal" style="padding: 10px 20px; color: #a7f3d0; font-weight: 600;" aria-live="polite">Shared project leaderboard · versions 37+</div>
             <div class="leaderboard-table-container">
                 <table class="leaderboard-table" id="leaderboard-table-scores">
                     <thead>
@@ -557,7 +558,10 @@
                 <div style="font-size: 0.85rem; color: #94a3b8; font-weight: 600;" id="leaderboard-status-label">
                     ● Fastest Speedrun Records • Auto-syncing
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <button id="leaderboard-prev-btn" class="main-menu-btn" style="width: auto; padding: 8px 12px; margin: 0;" disabled>←</button>
+                    <span id="leaderboard-page-label" style="align-self: center; white-space: nowrap;">1 / 1</span>
+                    <button id="leaderboard-next-btn" class="main-menu-btn" style="width: auto; padding: 8px 12px; margin: 0;" disabled>→</button>
                     <button id="leaderboard-refresh-btn" class="main-menu-btn" style="width: auto; padding: 8px 18px; font-size: 0.9rem; background: #334155; margin: 0;">↻ Sync Now</button>
                     <button id="leaderboard-close-btn" class="main-menu-btn" style="width: auto; padding: 8px 18px; font-size: 0.9rem; background: #dc2626; margin: 0;">Close</button>
                 </div>

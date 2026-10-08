@@ -116,6 +116,8 @@ const userKeyOf = (userId, username) => (userId ? String(userId) : String(userna
 const parseJson = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
 
 // ---- Leaderboard view ----
+// This is the project's persistent env.DB, never a seed/revision/localStorage
+// database. Keep the same tables and relative API contract across v37+ updates.
 // Walks every surviving run fastest-first and builds two lists:
 //  candidates: each player's best run that isn't removed (what the top would
 //              be if every pending run were approved) - used for review & replays
@@ -127,7 +129,7 @@ async function loadBoard(env) {
     "COALESCE(NULLIF(l.user_id, ''), l.username) AS user_key, r.status AS review_status, r.reasons AS review_reasons " +
     "FROM leaderboard l LEFT JOIN lb_review r ON r.leaderboard_id = l.id " +
     "WHERE r.status IS NULL OR r.status != 'removed' " +
-    "ORDER BY l.elapsed_ms ASC, l.id ASC LIMIT 5000"
+    "ORDER BY l.elapsed_ms ASC, l.id ASC"
   ).all();
   const { results: bans } = await env.DB.prepare("SELECT user_key FROM banned_users").all();
   const banned = new Set((bans || []).map(b => b.user_key));
@@ -357,9 +359,18 @@ export default {
       try {
         const board = await loadBoard(env);
         const dev = isDev(headerUsername);
-        const list = board.shown.slice(0, 50);
+        const pageSize = Math.max(10, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 50)));
+        const pages = Math.max(1, Math.ceil(board.shown.length / pageSize));
+        const page = Math.max(1, Math.min(pages, Math.floor(Number(url.searchParams.get('page')) || 1)));
+        const list = board.shown.slice(0, 50); // v37+ clients retain their original contract
+        const entries = board.shown.slice((page - 1) * pageSize, page * pageSize);
+        const ranks = new Map(board.shown.map((row, index) => [row.id, index + 1]));
+        const isMine = row => headerUserId ? row.user_id === headerUserId
+          : !!headerUsername && row.username.toLowerCase() === headerUsername.toLowerCase();
+        const mine = board.shown.find(isMine) || null;
+        const candidate = board.candidates.find(isMine) || null;
         const queue = dev ? board.candidates.slice(0, REVIEW_TOP_N + 5).filter(r => !r.approved) : [];
-        const all = [...list, ...queue];
+        const all = [...list, ...entries, ...queue, ...(mine ? [mine] : [])];
 
         const { results: replayRows } = await env.DB
           .prepare("SELECT leaderboard_id, video_url, data_url, duration_ms FROM replays")
@@ -382,6 +393,7 @@ export default {
             items_collected: row.items_collected, verified: row.verified, created_at: row.created_at,
             replay_video_url: row.replay_video_url, replay_data_url: row.replay_data_url,
             replay_duration_ms: row.replay_duration_ms,
+            rank: ranks.get(row.id) || null,
           };
           if (withDev) {
             out.user_key = row.user_key;
@@ -403,7 +415,13 @@ export default {
         }
 
         const top = list.map(r => clean(r, dev));
-        const response = { top_times: top, top_scores: top };
+        const response = {
+          top_times: top, top_scores: top, entries: entries.map(r => clean(r, dev)),
+          total_players: board.shown.length, page, page_size: pageSize, pages,
+          has_more: page < pages, scope: 'project-global', since_version: 37,
+          my_best: mine ? clean(mine, dev) : null,
+          my_status: mine ? 'ranked' : candidate ? (candidate.verified === 1 ? 'pending_review' : 'unverified') : 'no_run',
+        };
         if (dev) {
           response.review_queue = queue.map(r => clean(r, true));
           const { results: bans } = await env.DB

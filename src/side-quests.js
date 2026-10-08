@@ -841,10 +841,8 @@ function tryEnterCar() {
 
 function startTrunkLoading() {
     const car = S.car;
-    const names = (api.shoppingList || []).flatMap(item =>
-        Array(Math.min(item.quantity || 1, 2)).fill(item.name));
-    const groceries = names.slice(0, 6);
-    if (!groceries.length) groceries.push('Groceries');
+    const groceries = api.groceryBags || [];
+    if (!groceries.length) { startCarEngine(); return; }
     const overlay = document.createElement('div');
     overlay.id = 'trunk-loading';
     overlay.innerHTML = `<div class="trunk-scene">
@@ -860,12 +858,14 @@ function startTrunkLoading() {
     const tray = overlay.querySelector('.trunk-groceries');
     const trunk = overlay.querySelector('.trunk-dropzone');
     let loaded = 0;
-    groceries.forEach(name => {
+    groceries.forEach((groceryBag, index) => {
+        const name = `Bag ${index + 1} · ${groceryBag.items.length} item${groceryBag.items.length === 1 ? '' : 's'}`;
         const bag = document.createElement('div');
         bag.className = 'trunk-bag';
         bag.innerHTML = `<span class="trunk-bag-icon">🛍️</span><span class="trunk-bag-name"></span>`;
         bag.querySelector('.trunk-bag-name').textContent = name;
         bag.setAttribute('aria-label', `Drag ${name} from below into the trunk slot`);
+        bag.title = groceryBag.items.map(item => item.name).join(', ');
         tray.appendChild(bag);
         let startX, startY;
         bag.addEventListener('pointerdown', event => {
@@ -892,6 +892,7 @@ function startTrunkLoading() {
                 return;
             }
             loaded++;
+            api.loadGroceryBag?.(groceryBag);
             bag.remove();
             const stowed = document.createElement('span');
             stowed.textContent = '🛍️';

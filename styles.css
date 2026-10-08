@@ -1549,6 +1549,7 @@ button:hover {
     border-radius: 20px;
     width: min(92vw, 680px);
     max-height: 82vh;
+    overflow-y: auto;
     display: none;
     z-index: 105;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.15);
@@ -1734,6 +1735,8 @@ button:hover {
 
 .leaderboard-actions {
     display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
     justify-content: space-between;
     align-items: center;
     margin-top: 16px;
