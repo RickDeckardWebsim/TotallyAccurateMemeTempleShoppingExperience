@@ -122,6 +122,28 @@
     #ss-open           { bottom: calc(1.4vmin + 30px + 80px + var(--hidden-bottom, 0px)); }
 }
 
+#support-message {
+    position: absolute;
+    top: calc(1.4vmin + clamp(10px, 2.2vh, 24px));
+    left: calc(1.4vmin + clamp(10px, 2.2vw, 24px));
+    z-index: 102;
+    width: min(290px, calc(100vw - 36px));
+    box-sizing: border-box;
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.82);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(239, 248, 255, 0.94), rgba(206, 231, 249, 0.88));
+    box-shadow: 0 8px 22px rgba(15, 44, 74, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    color: #21415f;
+    font: 700 clamp(14px, 1.4vw, 17px)/1.25 'Patrick Hand', cursive;
+    text-align: left;
+    pointer-events: none;
+}
+
+#game-container:not(.menu-active) #support-message {
+    display: none;
+}
+
 /* Keep the other menus usable on any screen size */
 #customization-menu,
 #settings-menu,
