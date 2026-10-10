@@ -122,15 +122,17 @@ const isDev = (name) => !!name && DEVS.includes(String(name).toLowerCase());
 const userKeyOf = (userId, username) => (userId ? String(userId) : String(username || ""));
 const parseJson = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
 
-// One-time handoff of the two existing contest entries, explicitly requested
+// One-time handoff of the existing contest entries, explicitly requested
 // by the owner. These are the exact public records from MemeTemple's project
 // rc2hemacjkr81mshe0gm (revision 2), not seeded/demo scores. No recordings
-// existed for either run. Markers survive removal/bans and prevent reinsertion;
+// existed for these runs. Markers survive removal/bans and prevent reinsertion;
 // the imported rows thereafter obey the ordinary personal-best/ranking rules.
 const CONTEST_SOURCE = 'rc2hemacjkr81mshe0gm';
 const CONTEST_ENTRIES = [
   { id: 3, user: '5dda3fac-856e-4949-9c08-e1c719182e0a', name: 'Absolutely_Aaden123', time: '00:06:05.42', ms: 365429, completion: 100, items: 12, at: 1791589819782 },
   { id: 1, user: '3420d00e-3c9e-4d4f-ad42-eb2142c6c4c1', name: 'wilupguy', time: '00:06:24.19', ms: 384198, completion: 73, items: 11, at: 1791589267096 },
+  { id: 5, user: '8c8fe568-528e-4ee6-93e9-2969330c4f4c', name: 'Czernysrioo29', time: '00:07:06.49', ms: 426497, completion: 100, items: 15, at: 1791591001078 },
+  { id: 4, user: 'b43c7c17-d63a-4d3e-b074-1a285773c7e4', name: 'Silk', time: '00:07:46.13', ms: 466130, completion: 95, items: 20, at: 1791590635869 },
 ];
 const contestImports = new WeakMap();
 async function ensureContestImports(env) {
