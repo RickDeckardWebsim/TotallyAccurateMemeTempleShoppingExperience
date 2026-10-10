@@ -300,6 +300,11 @@ a.ss-who[href]:hover span { text-decoration: underline; }
     cursor: pointer;
 }
 .rp-play:hover { background: #ffffff33; }
+.rp-retry { border: 0; border-radius: 999px; padding: 6px 12px; background: #facc15; color: #172033; cursor: pointer; font-weight: 700; }
+.rp-retry.hidden { display: none; }
+#rp-viewer .ss-bar { max-width: calc(100vw - 20px); box-sizing: border-box; }
+#rp-viewer .ss-who { min-width: 0; }
+#rp-viewer .ss-wait span { max-width: min(480px, 80vw); text-align: center; }
 .rp-seek {
     width: min(260px, 26vw);
     accent-color: #4cd964;
@@ -317,7 +322,10 @@ a.ss-who[href]:hover span { text-decoration: underline; }
     cursor: pointer;
 }
 .lb-watch-btn:hover { filter: brightness(1.1); }
+.lb-no-replay { color: #94a3b8; font-size: 0.8rem; }
 
 @media (max-width: 600px) {
     .rp-seek { width: 90px; }
+    #rp-viewer .ss-bar { flex-wrap: wrap; justify-content: center; border-radius: 18px; gap: 6px; }
+    #rp-viewer .rp-badge { font-size: 0.8rem; }
 }

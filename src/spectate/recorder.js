@@ -2,20 +2,19 @@
 // rendered first-person view as video, plus a timeline of the mirrored HUD
 // and audio playback). Nothing leaves the device unless the server says the
 // finished run became this player's best inside the top 10. Failed runs and
-// runs longer than 5 minutes are thrown away.
+// runs longer than 10 minutes are thrown away.
 
 import { net } from './net.js';
 import { captureHud, onScreenFrame } from './broadcast.js';
 
-const MAX_MS = 5 * 60 * 1000;
 const FPS = 30;
 const MAX_H = 720;
 const BITRATE = 1_200_000;
 const HUD_INTERVAL = 150;
 const HUD_KEEPALIVE = 2000;
 const TAIL_MS = 1800; // keep recording briefly after checkout to show the finish
-// Wall-clock recording cap: pauses add real time on top of the 5 minute run limit.
-const MAX_WALL_MS = 10 * 60 * 1000;
+// Wall-clock recording cap: pauses add real time on top of the 10 minute run limit.
+const MAX_WALL_MS = 15 * 60 * 1000;
 
 const composite = document.createElement('canvas');
 const ctx = composite.getContext('2d', { alpha: false });
@@ -26,13 +25,15 @@ let lastRun = null;  // this session's latest completed run, kept for export
 
 function pickMime() {
     if (typeof MediaRecorder === 'undefined') return null;
-    const list = ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm', 'video/mp4;codecs=avc1', 'video/mp4'];
+    // Prefer MP4 when the browser can encode it: these recordings also play
+    // on Safari/iPhones, rather than depending on the recorder's WebM codec.
+    const list = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
     for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (_) {} }
     return null;
 }
 
-function fitSize(w, h) {
-    const s = Math.min(1, MAX_H / h);
+function fitSize(w, h, maxH = MAX_H) {
+    const s = Math.min(1, maxH / h);
     return [Math.max(2, Math.round(w * s) & ~1), Math.max(2, Math.round(h * s) & ~1)];
 }
 
@@ -53,6 +54,7 @@ function discard() {
     if (rec) {
         const r = rec;
         rec = null;
+        r.cancelled = true;
         try { if (r.mr.state !== 'inactive') r.mr.stop(); } catch (_) {}
         try { r.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
     }
@@ -60,31 +62,35 @@ function discard() {
 
 function start() {
     // Enforce eligibility here too, even if a caller invokes the hook directly.
-    if (!canRecordRun()) { discard(); pending = null; return; }
+    if (!canRecordRun()) {
+        if (rec?.stopAt) finish(); else discard();
+        return;
+    }
     // A finished run still in its short tail keeps its recording.
     if (rec && rec.stopAt) finish(); else discard();
-    // Phones skip local replay recording: a live 720p video encode on top of
-    // the game is what pushes iOS over its memory cap.
-    if (typeof window.__lowMem === 'function' && window.__lowMem()) return;
+    // Still record phone runs, using a small encode instead of disabling
+    // their replays entirely. This does not change the game's render quality.
+    const lowMem = typeof window.__lowMem === 'function' && window.__lowMem();
+    const fps = lowMem ? 15 : FPS;
     const mime = pickMime();
     const gs = typeof window.__ssGameState === 'function' ? window.__ssGameState() : null;
     const canvas = gs && gs.renderer && gs.renderer.domElement;
     if (!mime || !canvas || !composite.captureStream) return;
-    const [w, h] = fitSize(canvas.width || 1280, canvas.height || 720);
+    const [w, h] = fitSize(canvas.width || 1280, canvas.height || 720, lowMem ? 360 : MAX_H);
     composite.width = w;
     composite.height = h;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
     let stream, mr;
     try {
-        stream = composite.captureStream(FPS);
-        mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: BITRATE });
+        stream = composite.captureStream(fps);
+        mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: lowMem ? 350_000 : BITRATE });
     } catch (e) {
         console.warn('[replay] recorder unavailable', e);
         return;
     }
     rec = {
-        mr, stream, mime,
+        mr, stream, mime, fps,
         chunks: [],
         hud: [],
         audio: [],
@@ -98,7 +104,10 @@ function start() {
         w: window.innerWidth,
         h: window.innerHeight,
     };
-    mr.ondataavailable = (e) => { if (e.data && e.data.size && rec && rec.mr === mr) rec.chunks.push(e.data); };
+    const recording = rec;
+    // MediaRecorder emits its last chunk asynchronously. A quick restart
+    // must not drop it or mix the previous run into the next recording.
+    mr.ondataavailable = (e) => { if (!recording.cancelled && e.data?.size) recording.chunks.push(e.data); };
     mr.start(1000);
     tickHud(true);
 }
@@ -107,7 +116,7 @@ function start() {
 onScreenFrame((canvas) => {
     if (!isRecording() || !canvas.width) return;
     const t = performance.now();
-    if (t - rec.lastFrame < 1000 / FPS - 2) return;
+    if (t - rec.lastFrame < 1000 / rec.fps - 2) return;
     rec.lastFrame = t;
     try {
         ctx.drawImage(canvas, 0, 0, composite.width, composite.height);
@@ -207,13 +216,16 @@ async function finish() {
     });
     try { r.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
     if (rec === r) rec = null;
-    if (duration > MAX_WALL_MS + TAIL_MS + 4000 || !r.chunks.length) { pending = null; return; }
-    const entry = pending && pending.rec === r ? pending : { rec: r, claim: undefined };
+    if (r.cancelled || duration > MAX_WALL_MS + TAIL_MS + 4000 || !r.chunks.length) {
+        if (pending?.rec === r) pending = null;
+        return;
+    }
+    const entry = r.pending || { rec: r, claim: undefined };
     entry.video = new Blob(r.chunks, { type: r.mime.split(';')[0] });
     lastRun = { video: entry.video, at: Date.now(), time: r.finalTime || '' };
     entry.data = { v: 1, w: r.w, h: r.h, dur: duration, hud: r.hud, audio: r.audio };
-    pending = entry;
-    maybeUpload();
+    if (!pending || pending.rec === r) pending = entry;
+    maybeUpload(entry);
 }
 
 // ---------------------------------------------------------------- upload
@@ -242,10 +254,9 @@ async function uploadFile(blob, name, kind, token) {
     return j.url;
 }
 
-async function maybeUpload() {
-    const p = pending;
+async function maybeUpload(p = pending) {
     if (!p || !p.video || p.claim === undefined || p.uploading) return;
-    if (!p.claim) { pending = null; return; }
+    if (!p.claim) { if (pending === p) pending = null; return; }
     p.uploading = true;
     const token = p.claim.replay_token;
     try {
@@ -278,7 +289,14 @@ window.__replayRunEnded = (success, finalTime) => {
     if (!canRecordRun() || !success || now() > MAX_WALL_MS) { discard(); pending = null; return; }
     rec.finalTime = finalTime || '';
     rec.stopAt = performance.now() + TAIL_MS;
-    pending = { rec, claim: undefined };
+    const entry = { rec, claim: undefined };
+    rec.pending = pending = entry;
+    // Tie the delayed score response to THIS recording, even if the player
+    // has already started another run before the upload claim arrives.
+    return claim => {
+        entry.claim = claim?.replay_token ? claim : null;
+        maybeUpload(entry);
+    };
 };
 
 window.__replayClaim = (claim) => {
@@ -304,7 +322,6 @@ window.__replayDownloadLocal = () => {
 
 net.onFrame((t) => {
     if (!rec || rec.stopping) return;
-    if (!canRecordRun()) { discard(); pending = null; return; }
     const gs = typeof window.__ssGameState === 'function' ? window.__ssGameState() : null;
     const live = !!(gs && gs.live);
     if (rec.stopAt) {
@@ -312,7 +329,8 @@ net.onFrame((t) => {
         else tickHud();
         return;
     }
-    // Left the run without finishing it, or it ran past the 5 minute limit.
+    if (!canRecordRun()) { discard(); pending = null; return; }
+    // Left the run without finishing it, or exceeded the recording safety cap.
     if (!live || now() > MAX_WALL_MS) { discard(); pending = null; return; }
     tickHud();
 });

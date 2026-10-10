@@ -21,6 +21,7 @@ el.innerHTML = `
         <button type="button" class="rp-play" aria-label="Pause">❚❚</button>
         <input type="range" class="rp-seek" min="0" max="1000" value="0" step="1" aria-label="Seek">
         <span class="ss-time rp-time">0:00 / 0:00</span>
+        <button type="button" class="rp-retry hidden">Retry</button>
         <button type="button" class="ss-leave">Leave</button>
     </div>`;
 document.body.appendChild(el);
@@ -36,6 +37,7 @@ const badgeEl = el.querySelector('.rp-badge');
 const playBtn = el.querySelector('.rp-play');
 const seekEl = el.querySelector('.rp-seek');
 const timeEl = el.querySelector('.rp-time');
+const retryBtn = el.querySelector('.rp-retry');
 
 const st = {
     open: false,
@@ -52,7 +54,26 @@ const st = {
     ended: false,
     seeking: false,
     token: 0,
+    entry: null,
+    controller: null,
+    waitingSince: 0,
+    blocked: false,
+    failed: false,
 };
+
+function message(text, retry = false) {
+    waitText.textContent = text;
+    waitEl.classList.remove('hidden');
+    retryBtn.classList.toggle('hidden', !retry);
+}
+function fail(text) {
+    st.failed = true;
+    st.waitingSince = 0;
+    video.pause();
+    holdMirrors(true);
+    message(text, true);
+    renderPlay();
+}
 
 function fmt(ms) {
     const s = Math.max(0, Math.floor(ms / 1000));
@@ -70,12 +91,13 @@ function layout() {
 }
 window.addEventListener('resize', () => { if (st.open) layout(); });
 
-async function loadData(url) {
-    const res = await fetch(url);
+async function loadData(url, signal) {
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error('replay data unavailable');
     const buf = new Uint8Array(await res.arrayBuffer());
     let text;
-    if (buf[0] === 0x1f && buf[1] === 0x8b && typeof DecompressionStream !== 'undefined') {
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('HUD decompression unavailable');
         const s = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
         text = await new Response(s).text();
     } else {
@@ -121,6 +143,7 @@ function advance(tMs) {
         if (next && next[0] <= tMs && !(snap.x && snap.x.length)) continue;
         applyAudioSnapshot(snap, video.paused ? 0 : (tMs - t) / 1000);
     }
+    if (video.paused || video.readyState < 3) holdMirrors(true);
 }
 
 // Jump anywhere: rebuild HUD state from the start and restart the audio
@@ -148,8 +171,26 @@ function rewind(tMs) {
 function setPlaying(on) {
     if (on) {
         if (st.ended) { st.ended = false; video.currentTime = 0; rewind(0); }
-        video.play().catch(() => {});
-        holdMirrors(false);
+        const token = st.token;
+        st.blocked = false;
+        st.waitingSince = performance.now();
+        // Do not await play(): stalled/invalid media can leave that promise
+        // pending forever. Media events and the watchdog own the loading UI.
+        video.play().then(() => {
+            if (!st.open || token !== st.token) return;
+            st.failed = false;
+            holdMirrors(false);
+            renderPlay();
+        }).catch(e => {
+            if (!st.open || token !== st.token) return;
+            if (e.name === 'AbortError') return;
+            if (e.name === 'NotAllowedError') {
+                st.blocked = true;
+                st.waitingSince = 0;
+                message('Press Play to watch this replay.');
+                renderPlay();
+            } else fail('This recording cannot play in this browser. Try Retry or another browser.');
+        });
     } else {
         video.pause();
         holdMirrors(true);
@@ -165,8 +206,27 @@ function renderPlay() {
 playBtn.onclick = () => { setPlaying(video.paused || st.ended); playBtn.blur(); };
 stageEl.addEventListener('click', () => { if (st.open && st.data) setPlaying(video.paused || st.ended); });
 video.addEventListener('ended', () => { st.ended = true; holdMirrors(true); renderPlay(); });
-video.addEventListener('waiting', () => { if (st.open && st.data) { waitText.textContent = 'Buffering…'; waitEl.classList.remove('hidden'); } });
-video.addEventListener('playing', () => waitEl.classList.add('hidden'));
+video.addEventListener('waiting', () => {
+    if (st.open && !st.blocked && !st.failed) {
+        st.waitingSince ||= performance.now();
+        message('Buffering…');
+        holdMirrors(true);
+    }
+});
+video.addEventListener('playing', () => {
+    if (!st.open) return;
+    st.waitingSince = 0; st.blocked = false; st.failed = false;
+    waitEl.classList.add('hidden'); retryBtn.classList.add('hidden');
+    holdMirrors(false); renderPlay();
+});
+video.addEventListener('pause', () => { holdMirrors(true); renderPlay(); });
+video.addEventListener('error', () => { if (st.open && video.getAttribute('src')) fail('The recording could not be loaded. Press Retry to try again.'); });
+video.addEventListener('loadedmetadata', () => {
+    if (!st.open) return;
+    // MediaRecorder WebM often reports Infinity; use the saved duration then.
+    if (Number.isFinite(video.duration) && video.duration > 0) st.dur = video.duration * 1000;
+    timeEl.textContent = `${fmt(video.currentTime * 1000)} / ${fmt(st.dur)}`;
+});
 video.addEventListener('seeked', () => { if (!video.paused) waitEl.classList.add('hidden'); });
 
 seekEl.addEventListener('input', () => {
@@ -182,6 +242,7 @@ seekEl.addEventListener('input', () => {
 seekEl.addEventListener('change', () => { st.seeking = false; seekEl.blur(); });
 
 el.querySelector('.ss-leave').onclick = () => close();
+retryBtn.onclick = () => { const entry = st.entry; if (entry) open(entry); };
 
 // Keep the game underneath from reacting to input while a replay is open.
 for (const type of ['keydown', 'keyup']) {
@@ -199,11 +260,16 @@ for (const type of ['mousedown', 'mouseup', 'click', 'pointerdown', 'wheel', 'co
 
 // --------------------------------------------------------------- open/close
 async function open(entry) {
-    if (!entry || !entry.replay_video_url || !entry.replay_data_url) return;
+    if (!entry || !entry.replay_video_url) return;
     if (st.open) close();
     const token = ++st.token;
     st.open = true;
-    st.data = null;
+    // Video is usable even if an older run's optional HUD/audio file is gone.
+    st.data = { hud: [], audio: [] };
+    st.entry = entry;
+    st.controller = new AbortController();
+    st.waitingSince = performance.now();
+    st.blocked = false; st.failed = false; st.seeking = false;
     st.ended = false;
     st.hud = {};
     st.hudIdx = 0;
@@ -222,6 +288,7 @@ async function open(entry) {
     timeEl.textContent = `0:00 / ${fmt(st.dur)}`;
     waitText.textContent = 'Loading replay…';
     waitEl.classList.remove('hidden');
+    retryBtn.classList.add('hidden');
     worldEl.style.filter = worldEl.style.transform = worldEl.style.opacity = '';
     layout();
 
@@ -235,21 +302,34 @@ async function open(entry) {
     renderPlay();
 
     try {
-        const data = await loadData(entry.replay_data_url);
+        // Resolve a fresh, public recording by run ID, not the viewer's own
+        // upload/admin permissions or a stale leaderboard page index.
+        let recording = entry;
+        if (Number.isInteger(Number(entry.id)) && Number(entry.id) > 0) {
+            const res = await fetch(`/api/replay/${Number(entry.id)}`, { cache: 'no-store', signal: st.controller.signal });
+            const metadata = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(metadata.error || 'Recording unavailable.');
+            recording = { ...entry, ...metadata };
+        }
         if (token !== st.token) return;
-        st.data = data;
-        st.dur = Math.max(1, data.dur || st.dur);
-        st.w = data.w; st.h = data.h;
-        layout();
-        video.src = entry.replay_video_url;
-        await video.play().catch(() => {});
-        if (token !== st.token) return;
-        if (video.paused) waitText.textContent = 'Click to play';
-        renderPlay();
+        st.dur = Math.max(1, Number(recording.replay_duration_ms) || st.dur);
+        video.src = recording.replay_video_url;
+        video.load();
+        setPlaying(true);
+        // Fetch the timeline in parallel; it must NEVER gate video playback.
+        if (recording.replay_data_url) loadData(recording.replay_data_url, st.controller.signal).then(data => {
+            if (token !== st.token) return;
+            st.data = data;
+            if (!Number.isFinite(video.duration)) st.dur = Math.max(1, data.dur || st.dur);
+            st.w = data.w; st.h = data.h;
+            layout(); rewind(video.currentTime * 1000);
+        }).catch(e => {
+            if (token === st.token && e.name !== 'AbortError') console.warn('[replay] optional HUD/audio unavailable; playing video', e);
+        });
     } catch (e) {
-        if (token !== st.token) return;
+        if (token !== st.token || st.failed) return;
         console.warn('[replay] load failed', e);
-        waitText.textContent = 'This replay could not be loaded.';
+        fail(e.message || 'This replay could not be loaded.');
     }
 }
 
@@ -257,6 +337,7 @@ function close() {
     if (!st.open) return;
     st.open = false;
     st.token++;
+    st.controller?.abort(); st.controller = null;
     st.data = null;
     video.pause();
     video.removeAttribute('src');
@@ -272,6 +353,10 @@ window.__replayWatch = open;
 
 net.onFrame(() => {
     if (!st.open || !st.data) return;
+    if (st.waitingSince && performance.now() - st.waitingSince > 15000) {
+        st.controller?.abort();
+        fail('Loading timed out. Press Retry to reconnect, or Leave to return to the leaderboard.');
+    }
     const t = video.currentTime * 1000;
     if (!st.seeking) {
         advance(t);

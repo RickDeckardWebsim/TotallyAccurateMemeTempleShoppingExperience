@@ -91,10 +91,17 @@ export const schema = `
     banned_by TEXT,
     created_at INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS leaderboard_imports (
+    source_project TEXT NOT NULL,
+    source_run_id INTEGER NOT NULL,
+    leaderboard_id INTEGER NOT NULL,
+    PRIMARY KEY (source_project, source_run_id)
+  );
 `;
 
 const REPLAY_TOP_N = 10;
-const REPLAY_MAX_MS = 5 * 60 * 1000;
+const REPLAY_MAX_MS = 10 * 60 * 1000;
 const REPLAY_CLAIM_TTL = 30 * 60 * 1000;
 const REVIEW_TOP_N = 10;           // runs that would place this high need a dev's approval
 const MIN_PHYSICS_FLOOR_MS = 9500; // minimum possible time to complete any valid list
@@ -114,6 +121,36 @@ const isDev = (name) => !!name && DEVS.includes(String(name).toLowerCase());
 
 const userKeyOf = (userId, username) => (userId ? String(userId) : String(username || ""));
 const parseJson = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
+
+// One-time handoff of the two existing contest entries, explicitly requested
+// by the owner. These are the exact public records from MemeTemple's project
+// rc2hemacjkr81mshe0gm (revision 2), not seeded/demo scores. No recordings
+// existed for either run. Markers survive removal/bans and prevent reinsertion;
+// the imported rows thereafter obey the ordinary personal-best/ranking rules.
+const CONTEST_SOURCE = 'rc2hemacjkr81mshe0gm';
+const CONTEST_ENTRIES = [
+  { id: 3, user: '5dda3fac-856e-4949-9c08-e1c719182e0a', name: 'Absolutely_Aaden123', time: '00:06:05.42', ms: 365429, completion: 100, items: 12, at: 1791589819782 },
+  { id: 1, user: '3420d00e-3c9e-4d4f-ad42-eb2142c6c4c1', name: 'wilupguy', time: '00:06:24.19', ms: 384198, completion: 73, items: 11, at: 1791589267096 },
+];
+const contestImports = new WeakMap();
+async function ensureContestImports(env) {
+  if (!contestImports.has(env.DB)) {
+    const task = (async () => {
+      for (const row of CONTEST_ENTRIES) await env.DB.batch([
+        env.DB.prepare("INSERT INTO leaderboard (user_id, username, score, final_time, elapsed_ms, completion_percent, items_collected, verified, created_at) " +
+          "SELECT ?, ?, 0, ?, ?, ?, ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM leaderboard_imports WHERE source_project = ? AND source_run_id = ?) " +
+          "AND NOT EXISTS (SELECT 1 FROM leaderboard WHERE user_id = ? AND created_at = ? AND elapsed_ms = ?)")
+          .bind(row.user, row.name, row.time, row.ms, row.completion, row.items, row.at, CONTEST_SOURCE, row.id, row.user, row.at, row.ms),
+        env.DB.prepare("INSERT OR IGNORE INTO leaderboard_imports (source_project, source_run_id, leaderboard_id) " +
+          "SELECT ?, ?, id FROM leaderboard WHERE user_id = ? AND created_at = ? AND elapsed_ms = ? ORDER BY id LIMIT 1")
+          .bind(CONTEST_SOURCE, row.id, row.user, row.at, row.ms),
+      ]);
+    })();
+    contestImports.set(env.DB, task);
+    task.catch(() => contestImports.delete(env.DB));
+  }
+  await contestImports.get(env.DB);
+}
 
 // ---- Leaderboard view ----
 // This is the project's persistent env.DB, never a seed/revision/localStorage
@@ -150,10 +187,12 @@ async function loadBoard(env) {
 }
 
 function replayEligibleIds(board) {
-  return new Set([...board.candidates.slice(0, REPLAY_TOP_N), ...board.shown.slice(0, REPLAY_TOP_N)].map(r => r.id));
+  // One current best per player, at most ten recordings (including review
+  // candidates). An older approved best must not keep a superseded replay.
+  return new Set(board.candidates.slice(0, REPLAY_TOP_N).map(r => r.id));
 }
 
-// Replays only exist for runs in the (candidate or public) top 10; everything else is dropped.
+// Replays only exist for the current top-ten best runs; everything else is dropped.
 async function pruneReplays(env) {
   const keep = [...replayEligibleIds(await loadBoard(env))];
   if (!keep.length) { await env.DB.prepare("DELETE FROM replays").run(); }
@@ -163,7 +202,9 @@ async function pruneReplays(env) {
       .bind(...keep)
       .run();
   }
-  await env.DB.prepare("DELETE FROM replay_claims WHERE created_at < ?").bind(Date.now() - REPLAY_CLAIM_TTL).run();
+  if (!keep.length) await env.DB.prepare("DELETE FROM replay_claims").run();
+  else await env.DB.prepare(`DELETE FROM replay_claims WHERE created_at < ? OR leaderboard_id NOT IN (${keep.map(() => "?").join(",")})`)
+    .bind(Date.now() - REPLAY_CLAIM_TTL, ...keep).run();
 }
 
 async function claimIsLive(env, token) {
@@ -298,6 +339,8 @@ export default {
     const url = new URL(request.url);
     const headerUserId = request.headers.get("x-websim-user-id") || "";
     const headerUsername = request.headers.get("x-websim-username") || "";
+    try { await ensureContestImports(env); }
+    catch (err) { return Response.json({ error: "Contest leaderboard migration unavailable." }, { status: 503 }); }
 
     // POST /api/run/start -> Issues a server-authenticated run session token
     if (request.method === "POST" && url.pathname === "/api/run/start") {
@@ -435,6 +478,24 @@ export default {
       }
     }
 
+    // Public playback is read-only: spectators do not need an account, an
+    // upload claim, or developer privileges. Pending review remains dev-only.
+    if (request.method === "GET" && /^\/api\/replay\/\d+$/.test(url.pathname)) {
+      try {
+        const id = Number(url.pathname.split('/').pop());
+        const board = await loadBoard(env);
+        const visible = board.shown.slice(0, REPLAY_TOP_N).some(r => r.id === id) ||
+          (isDev(headerUsername) && board.candidates.slice(0, REPLAY_TOP_N).some(r => r.id === id));
+        if (!visible || !replayEligibleIds(board).has(id)) return Response.json({ error: "This run no longer has a top-ten recording." }, { status: 404 });
+        const replay = await env.DB.prepare("SELECT video_url, data_url, duration_ms FROM replays WHERE leaderboard_id = ?").bind(id).first();
+        if (!replay) return Response.json({ error: "A recording is not available for this run yet." }, { status: 404 });
+        return Response.json({ replay_video_url: replay.video_url, replay_data_url: replay.data_url,
+          replay_duration_ms: replay.duration_ms }, { headers: { 'Cache-Control': 'no-store' } });
+      } catch (err) {
+        return Response.json({ error: err.message }, { status: 500 });
+      }
+    }
+
     // POST /api/dev/review {leaderboard_id, action: approve|remove|pending}
     if (request.method === "POST" && url.pathname === "/api/dev/review") {
       if (!isDev(headerUsername)) return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -517,6 +578,11 @@ export default {
         const elapsedMs = typeof body.elapsed_ms === "number" ? Math.round(body.elapsed_ms) : 0;
         const completionPercent = typeof body.completion_percent === "number" ? body.completion_percent : 100;
         const itemsCollected = typeof body.items_collected === "number" ? body.items_collected : 0;
+        // Reject NEW incomplete checkouts; existing contest entries are not
+        // retroactively rewritten, disqualified, or permanently pinned.
+        if (completionPercent !== 100 || itemsCollected < 1) {
+          return Response.json({ ok: false, rejected: true, reason: "Finish every required item on your shopping list before checkout." });
+        }
 
         const reasons = track ? finalChecks(track, { elapsed_ms: elapsedMs, items_collected: itemsCollected })
                               : [{ r: "No live tracking for this run", hard: true }];
@@ -545,7 +611,7 @@ export default {
           ]);
         }
 
-        // A run that would place in the top 10 (and is under 5 minutes) uploads
+        // A run that would place in the top 10 (and is at most 10 minutes) uploads
         // its recording so a developer can review it.
         let replayToken = null;
         let pendingReview = false;
@@ -560,8 +626,9 @@ export default {
               .bind(replayToken, entryId, mine.user_key, createdAt)
               .run();
           }
-          await pruneReplays(env);
         }
+        // Even a slower/longer new submission can supersede a retained run.
+        await pruneReplays(env);
 
         return Response.json({
           ok: true,

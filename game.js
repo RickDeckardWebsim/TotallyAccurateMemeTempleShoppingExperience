@@ -37,6 +37,7 @@ import { rollPlayerHeaven, createPlayerHeaven } from './src/player-heaven.js';
 import { createCheckoutConveyor } from './src/checkout-conveyor.js';
 import { RETURN_DESK } from './src/return-counter.js';
 import { createShopperTraffic } from './src/shopper-traffic.js';
+import { shoppingProgress } from './src/shopping-progress.js';
 import { unlockAchievement, addAchievementProgress, setAchievementEligibility } from './src/achievements.js';
 import { showIosHelp } from './src/ios-help.js';
 import { createRunSeed, RULESET_KEYS, vanillaRulesetValue } from './src/run-seed.js';
@@ -4171,7 +4172,8 @@ function completeGroceryPurchase() {
     endBusyCheckoutIfActive();
     if (!SQ.sideQuestsEnabled()) { endGame(); return; }
     purchaseWrongItemsCount = countWrongItemsInCart();
-    paidListSnapshot = shoppingList.map(item => ({ ...item }));
+    const progress = shoppingProgress(shoppingList, collectedItems, outOfStockListItems);
+    paidListSnapshot = shoppingList.map((item, i) => ({ ...item, collected: progress.rows[i].collected }));
     gumCravingActive = false;
     isCheckout = false;
     gamePaused = false;
@@ -4187,10 +4189,8 @@ function completeGroceryPurchase() {
 
 function getRunMetrics(elapsed) {
     const list = paidListSnapshot || shoppingList;
-    const totalRequired = list.reduce((sum, item) => sum + (item.quantity || 1), 0);
-    const totalCollected = list.reduce((sum, item) => sum + Math.min(item.collected || 0, item.quantity || 1), 0);
-    const missingItems = Math.max(0, totalRequired - totalCollected);
-    const completionPercent = totalRequired > 0 ? Math.round((totalCollected / totalRequired) * 100) : 100;
+    const { totalRequired, totalCollected, missingItems, completionPercent } =
+        shoppingProgress(list, paidListSnapshot ? null : collectedItems, outOfStockListItems);
 
     return {
         totalRequired,
@@ -4243,10 +4243,11 @@ function endGame() {
     const runMetrics = getRunMetrics(elapsed);
 
     // If this was a failure, show unified failure overlay and skip best‑time handling
-    if (isFailure || !countsForLeaderboard() || elapsed > 300000) {
+    let replayClaimReceiver = null;
+    if (isFailure || !countsForLeaderboard() || elapsed > 600000) {
         try { window.__replayRunEnded?.(false); } catch (_) {}
     } else {
-        try { window.__replayRunEnded?.(true, finalTime); } catch (_) {}
+        try { replayClaimReceiver = window.__replayRunEnded?.(true, finalTime); } catch (_) {}
     }
     if (isFailure) {
         const subtitle = tweakerMoneyFailure
@@ -4300,7 +4301,7 @@ function endGame() {
             elapsed_ms: elapsed,
             completion_percent: runMetrics.completionPercent,
             items_collected: runMetrics.totalCollected
-        });
+        }, replayClaimReceiver);
     }
 
     // Prepare statistics text
@@ -8919,7 +8920,7 @@ function updateLeaderboardModalContent() {
                         <td><span class="leaderboard-time-val">${escapeText(entry.final_time || '00:00.00')}</span></td>
                         <td><span style="color: ${(entry.completion_percent || 100) >= 100 ? '#60a5fa' : '#f59e0b'}; font-weight: 600;">${entry.completion_percent || 100}%</span></td>
                         <td><span style="font-family: monospace; font-size: 0.95em; color: #e2e8f0;">${entry.items_collected || 0} items</span></td>
-                        <td>${entry.replay_video_url ? `<button type="button" class="lb-watch-btn" data-replay-idx="${idx}">▶ Watch</button>` : ''}${entry.seed ? `<button type="button" class="seed-copy" title="Copy run seed (dev)" data-seed-copy="${String(entry.seed).replace(/[^A-Za-z0-9._-]/g, '')}">🔑 Seed</button>` : ''}</td>
+                        <td>${entry.replay_video_url ? `<button type="button" class="lb-watch-btn" data-replay-idx="${idx}">▶ Watch</button>` : rank <= 10 ? '<span class="lb-no-replay" title="No saved recording exists for this run yet.">Not recorded</span>' : ''}${entry.seed ? `<button type="button" class="seed-copy" title="Copy run seed (dev)" data-seed-copy="${String(entry.seed).replace(/[^A-Za-z0-9._-]/g, '')}">🔑 Seed</button>` : ''}</td>
                     </tr>
                 `;
             });
@@ -8996,7 +8997,10 @@ function hideLeaderboardMenu() {
     if (menu) menu.style.display = 'none';
 }
 
-async function submitLeaderboardScore(speedrunPayload) {
+async function submitLeaderboardScore(speedrunPayload, replayClaimReceiver = null) {
+    // Capture the completed run before any awaits/restart can replace it.
+    const runId = currentRunSession?.runId || '';
+    const seed = currentRunSeed?.full || '';
     try {
         // Deliver the live tracker's final report before the score itself.
         await finishRunTrack(speedrunPayload.elapsed_ms);
@@ -9017,8 +9021,8 @@ async function submitLeaderboardScore(speedrunPayload) {
                 elapsed_ms: speedrunPayload.elapsed_ms,
                 completion_percent: speedrunPayload.completion_percent,
                 items_collected: speedrunPayload.items_collected,
-                run_id: currentRunSession ? currentRunSession.runId : '',
-                seed: currentRunSeed ? currentRunSeed.full : ''
+                run_id: runId,
+                seed
             })
         });
         const result = await res.json().catch(() => null);
@@ -9033,10 +9037,15 @@ async function submitLeaderboardScore(speedrunPayload) {
             statsBox.appendChild(line);
         }
         // Only a run that became the player's best inside the top 10 gets a replay claim.
-        try { window.__replayClaim?.(result && result.replay_token ? result : null); } catch (_) {}
+        try {
+            const claim = res.ok && result?.replay_token ? result : null;
+            if (replayClaimReceiver) replayClaimReceiver(claim);
+            else window.__replayClaim?.(claim);
+        } catch (_) {}
 
         pollLeaderboard();
     } catch (err) {
+        try { replayClaimReceiver?.(null); } catch (_) {}
         console.warn('Could not submit leaderboard speedrun:', err);
     }
 }
@@ -12583,7 +12592,8 @@ function updateConveyorCheckoutProgress() {
     const total = checkoutRowsActive.reduce((n, row) => n + row.qty, 0);
     const scanned = checkoutRowsActive.reduce((n, row) => n + row.scannedQty, 0);
     if (progressEl) progressEl.textContent = `${scanned} / ${total} scanned${checkoutConveyor ? ` · ${checkoutConveyor.bags.filter(b => b.loaded).length} / ${Math.ceil(total / 3)} bags in cart` : ''}`;
-    if (confirmBtn) confirmBtn.disabled = (!isLonelyStoreMode && !checkoutConveyor?.done) || scanned !== total || (gumCravingActive && !hasGumInCart());
+    if (confirmBtn) confirmBtn.disabled = (!isLonelyStoreMode && !checkoutConveyor?.done) || scanned !== total ||
+        !checkoutListComplete() || (gumCravingActive && !hasGumInCart());
     const status = document.getElementById('checkout-status');
     if (status) status.textContent = isLonelyStoreMode ? 'Click the receipt items to scan and escape.' : checkoutConveyor?.done
         ? 'Groceries bagged (up to 3 per bag) and back in your cart. Completing payment…'
@@ -12659,6 +12669,7 @@ function pressCheckoutButton() {
 
 function startCheckoutProcess() {
     if (isCheckout || gameOver || purchaseComplete) return;
+    if (!checkoutListComplete(true)) return;
     if (!isLonelyStoreMode && (!cart3D || !cartObject?.visible || cartFlingActive || !checkout || Math.hypot(cartObject.position.x - checkout.position.x, cartObject.position.z - checkout.position.z) > 5.5)) {
         displayMessage('Park your cart near the checkout conveyor to scan your groceries.', 2500, true);
         checkoutExitCooldownUntil = Date.now() + 2500;
@@ -12796,6 +12807,7 @@ function startCheckoutProcess() {
     if (btnConfirm) {
         btnConfirm.onclick = () => {
             if (purchaseComplete) return;
+            if (!checkoutListComplete(true)) return;
             // Check gum craving requirement
             if (gumCravingActive && !hasGumInCart()) {
                 displayMessage("🍬 Put Chewing Gum in your cart to satisfy your craving!", 2500, true);
@@ -12819,6 +12831,19 @@ function startCheckoutProcess() {
 
     // Show overlay
     checkoutUIElement.classList.add('visible');
+}
+
+function checkoutListComplete(notify = false) {
+    // Lonely Store is an intentional escape scenario, not an ordinary shop.
+    if (isLonelyStoreMode) return true;
+    const missing = shoppingProgress(shoppingList, collectedItems, outOfStockListItems).rows.filter(row => row.missing > 0);
+    if (!missing.length) return true;
+    if (notify) {
+        const summary = missing.slice(0, 3).map(row => `${row.name} ×${row.missing}`).join(', ');
+        displayMessage(`Finish your grocery list before checkout: ${summary}${missing.length > 3 ? ', …' : ''}.`, 3000, true);
+        checkoutExitCooldownUntil = Date.now() + 3000;
+    }
+    return false;
 }
 
 // Popups that stop the player (customer question, manager, tweaker, checkout,
