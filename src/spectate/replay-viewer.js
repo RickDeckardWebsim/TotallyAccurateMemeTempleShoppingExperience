@@ -43,6 +43,8 @@ const st = {
     open: false,
     data: null,
     dur: 1,
+    recordedDur: 0,
+    timelineDur: 0,
     w: 1280,
     h: 720,
     hudReady: false,
@@ -80,6 +82,30 @@ function fmt(ms) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function positiveMs(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function updateDuration() {
+    if (!st.open) return;
+    const current = positiveMs(video.currentTime * 1000);
+    let seekableEnd = 0;
+    try {
+        const ranges = video.seekable;
+        if (ranges.length) seekableEnd = positiveMs(ranges.end(ranges.length - 1) * 1000);
+    } catch (_) {}
+    // A fragmented recording can initially report only its first few seconds.
+    // Never shrink the known full recording/timeline to that partial metadata,
+    // or treat the currently buffered portion as the end of the replay.
+    st.dur = video.ended && current ? current : Math.max(1, st.dur,
+        st.recordedDur, st.timelineDur, positiveMs(video.duration * 1000), current, seekableEnd);
+    if (!st.seeking) {
+        seekEl.value = String(Math.round(Math.min(1, current / st.dur) * 1000));
+        timeEl.textContent = `${fmt(current)} / ${fmt(st.dur)}`;
+    }
+}
+
 function layout() {
     const vw = window.innerWidth, vh = window.innerHeight;
     const s = Math.min(vw / st.w, vh / st.h);
@@ -104,12 +130,14 @@ async function loadData(url, signal) {
         text = new TextDecoder().decode(buf);
     }
     const d = JSON.parse(text);
+    const hud = Array.isArray(d.hud) ? d.hud : [];
+    const audio = Array.isArray(d.audio) ? d.audio : [];
     return {
         w: Number(d.w) || 1280,
         h: Number(d.h) || 720,
-        dur: Number(d.dur) || 0,
-        hud: Array.isArray(d.hud) ? d.hud : [],
-        audio: Array.isArray(d.audio) ? d.audio : [],
+        dur: Math.max(positiveMs(d.dur), positiveMs(hud.at(-1)?.[0]), positiveMs(audio.at(-1)?.[0])),
+        hud,
+        audio,
     };
 }
 
@@ -205,7 +233,7 @@ function renderPlay() {
 
 playBtn.onclick = () => { setPlaying(video.paused || st.ended); playBtn.blur(); };
 stageEl.addEventListener('click', () => { if (st.open && st.data) setPlaying(video.paused || st.ended); });
-video.addEventListener('ended', () => { st.ended = true; holdMirrors(true); renderPlay(); });
+video.addEventListener('ended', () => { st.ended = true; updateDuration(); holdMirrors(true); renderPlay(); });
 video.addEventListener('waiting', () => {
     if (st.open && !st.blocked && !st.failed) {
         st.waitingSince ||= performance.now();
@@ -221,12 +249,9 @@ video.addEventListener('playing', () => {
 });
 video.addEventListener('pause', () => { holdMirrors(true); renderPlay(); });
 video.addEventListener('error', () => { if (st.open && video.getAttribute('src')) fail('The recording could not be loaded. Press Retry to try again.'); });
-video.addEventListener('loadedmetadata', () => {
-    if (!st.open) return;
-    // MediaRecorder WebM often reports Infinity; use the saved duration then.
-    if (Number.isFinite(video.duration) && video.duration > 0) st.dur = video.duration * 1000;
-    timeEl.textContent = `${fmt(video.currentTime * 1000)} / ${fmt(st.dur)}`;
-});
+for (const type of ['loadedmetadata', 'durationchange', 'progress', 'timeupdate']) {
+    video.addEventListener(type, updateDuration);
+}
 video.addEventListener('seeked', () => { if (!video.paused) waitEl.classList.add('hidden'); });
 
 seekEl.addEventListener('input', () => {
@@ -276,7 +301,9 @@ async function open(entry) {
     st.audioIdx = 0;
     st.lastT = 0;
     st.w = 1280; st.h = 720;
-    st.dur = Math.max(1, Number(entry.replay_duration_ms) || 1);
+    st.recordedDur = positiveMs(entry.replay_duration_ms);
+    st.timelineDur = 0;
+    st.dur = Math.max(1, st.recordedDur);
 
     try { document.exitPointerLock?.(); } catch (_) {}
     const name = entry.username || 'Shopper';
@@ -312,7 +339,8 @@ async function open(entry) {
             recording = { ...entry, ...metadata };
         }
         if (token !== st.token) return;
-        st.dur = Math.max(1, Number(recording.replay_duration_ms) || st.dur);
+        st.recordedDur = Math.max(st.recordedDur, positiveMs(recording.replay_duration_ms));
+        st.dur = Math.max(st.dur, st.recordedDur);
         video.src = recording.replay_video_url;
         video.load();
         setPlaying(true);
@@ -320,7 +348,8 @@ async function open(entry) {
         if (recording.replay_data_url) loadData(recording.replay_data_url, st.controller.signal).then(data => {
             if (token !== st.token) return;
             st.data = data;
-            if (!Number.isFinite(video.duration)) st.dur = Math.max(1, data.dur || st.dur);
+            st.timelineDur = data.dur;
+            updateDuration();
             st.w = data.w; st.h = data.h;
             layout(); rewind(video.currentTime * 1000);
         }).catch(e => {
@@ -359,8 +388,7 @@ net.onFrame(() => {
     }
     const t = video.currentTime * 1000;
     if (!st.seeking) {
+        updateDuration();
         advance(t);
-        seekEl.value = String(Math.round(Math.min(1, t / st.dur) * 1000));
-        timeEl.textContent = `${fmt(t)} / ${fmt(st.dur)}`;
     }
 });
