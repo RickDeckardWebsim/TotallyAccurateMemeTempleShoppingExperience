@@ -134,6 +134,7 @@ const CONTEST_ENTRIES = [
   { id: 5, user: '8c8fe568-528e-4ee6-93e9-2969330c4f4c', name: 'Czernysrioo29', time: '00:07:06.49', ms: 426497, completion: 100, items: 15, at: 1791591001078 },
   { id: 4, user: 'b43c7c17-d63a-4d3e-b074-1a285773c7e4', name: 'Silk', time: '00:07:46.13', ms: 466130, completion: 95, items: 20, at: 1791590635869 },
   { id: 6, user: 'anon_c59e37d1-e5eb-441b-b0d6-858d72cc78d4', name: 'Shopper', time: '00:05:34.48', ms: 334485, completion: 100, items: 14, at: 1791591229121 },
+  { id: 7, user: '5dda3fac-856e-4949-9c08-e1c719182e0a', name: 'Absolutely_Aaden123', time: '00:03:56.91', ms: 236911, completion: 100, items: 14, at: 1791591305621 },
 ];
 const contestImports = new WeakMap();
 async function ensureContestImports(env) {
@@ -148,6 +149,8 @@ async function ensureContestImports(env) {
           "SELECT ?, ?, id FROM leaderboard WHERE user_id = ? AND created_at = ? AND elapsed_ms = ? ORDER BY id LIMIT 1")
           .bind(CONTEST_SOURCE, row.id, row.user, row.at, row.ms),
       ]);
+      // A newly imported personal best replaces the old run's recording too.
+      await pruneReplays(env);
     })();
     contestImports.set(env.DB, task);
     task.catch(() => contestImports.delete(env.DB));
